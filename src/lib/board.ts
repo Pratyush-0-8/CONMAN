@@ -1,8 +1,20 @@
-import { type PlayerStats } from './game'
-import { LEADERBOARD } from './mock'
+import { useEffect, useState } from 'react'
+import type { PlayerStats } from './game'
 import type { LbEntry } from '../components/lists'
+import { supabase } from './supabase'
 
-export function buildBoard(player: PlayerStats | null): LbEntry[] {
-  const all = [...LEADERBOARD.map((p) => ({ ...p, me: false })), ...(player ? [{ name: player.name, elo: player.elo, wins: player.wins, losses: player.losses + player.draws, me: true }] : [])]
-  return all.sort((a, b) => b.elo - a.elo).map((p, i) => ({ ...p, rank: i + 1 }))
+export function useLeaderboard(player: PlayerStats | null) {
+  const [board, setBoard] = useState<LbEntry[]>([])
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let alive = true
+    void supabase.rpc('ranked_leaderboard').then(({ data, error }) => {
+      if (!alive) return
+      if (error) { setError('Could not load the leaderboard.'); return }
+      setError('')
+      setBoard((data || []).map((p: { id: string; username: string; elo: number; wins: number; losses: number; draws: number; rank: number }) => ({ name: p.username, elo: p.elo, wins: p.wins, losses: p.losses, draws: p.draws, rank: Number(p.rank), me: p.id === player?.id })))
+    })
+    return () => { alive = false }
+  }, [player?.id, player?.elo])
+  return { board, error }
 }

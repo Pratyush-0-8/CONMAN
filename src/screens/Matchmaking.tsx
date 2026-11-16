@@ -1,36 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Avatar, Button, Logo, RatingBadge, Wordmark } from '../components/ui'
 import { PlayerCard } from '../components/game'
 import type { Opponent, PlayerStats } from '../lib/game'
 
-const STATUS = ['Scanning the ranked pool', 'Looking for players near your rating', 'Widening the search range', 'Preparing a match']
+const STATUS = ['Scanning the ranked pool', 'Looking for players near your rating', 'Widening the search range', 'Waiting for another player']
 
-export function Matchmaking({ player, opp, onCancel, onReady }: { player: PlayerStats; opp: Opponent; onCancel: () => void; onReady: () => void }) {
-  const [t, setT] = useState(0)
-  const [found, setFound] = useState(false)
-  const foundAt = useRef(4 + Math.random() * 4.5)
-  const ready = useRef(onReady); ready.current = onReady
-
-  useEffect(() => {
-    if (found) return
-    const start = performance.now()
-    const id = setInterval(() => {
-      const s = (performance.now() - start) / 1000
-      setT(s)
-      if (s >= foundAt.current) { clearInterval(id); setFound(true) }
-    }, 100)
-    return () => clearInterval(id)
-  }, [found])
-  useEffect(() => { if (!found) return; const id = setTimeout(() => ready.current(), 3400); return () => clearTimeout(id) }, [found])
-
-  const mm = `0:${String(Math.floor(t)).padStart(2, '0')}`
+export function Matchmaking({ player, opp, joinedAt, clockOffset, onCancel }: { player: PlayerStats; opp: Opponent | null; joinedAt: string; clockOffset: number; onCancel: () => void }) {
+  const [now, setNow] = useState(Date.now() + clockOffset)
+  useEffect(() => { const id = setInterval(() => setNow(Date.now() + clockOffset), 100); return () => clearInterval(id) }, [clockOffset])
+  const t = Math.max(0, (now-Date.parse(joinedAt))/1000)
+  const mm = `${Math.floor(t/60)}:${String(Math.floor(t)%60).padStart(2,'0')}`
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-grid" />
       <div className="pointer-events-none absolute left-1/2 top-1/2 size-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/10 blur-[120px]" />
       <header className="relative z-10 flex h-16 items-center px-5 sm:px-8"><Wordmark /></header>
 
-      {!found ? (
+      {!opp ? (
         <main key="s" className="relative z-10 flex flex-1 animate-fade-in flex-col items-center justify-center px-6 pb-16 text-center">
           <div className="relative grid size-64 place-items-center sm:size-72">
             {[0, 0.8, 1.6].map((d) => <span key={d} className="absolute inset-8 animate-ping-slow rounded-full border border-accent/40" style={{ animationDelay: `${d}s` }} />)}
@@ -40,8 +26,7 @@ export function Matchmaking({ player, opp, onCancel, onReady }: { player: Player
           </div>
           <h1 className="mt-8 text-3xl font-semibold tracking-tight sm:text-4xl">Finding your opponent...</h1>
           <p key={Math.min(3, Math.floor(t / 2.5))} className="mt-2 animate-fade-in text-sm text-mute">{STATUS[Math.min(3, Math.floor(t / 2.5))]}</p>
-          <div className="mt-6 flex items-center gap-3"><span className="text-4xl font-semibold tabular">{mm}</span><span className="text-xs text-mute">/ 0:10 max</span></div>
-          <div className="mt-3 h-1 w-48 overflow-hidden rounded-full bg-line"><div className="h-full bg-accent transition-[width] duration-100" style={{ width: `${Math.min(100, t * 10)}%` }} /></div>
+          <div className="mt-6 flex items-center gap-3"><span className="text-4xl font-semibold tabular">{mm}</span></div>
           <div className="mt-8 flex items-center gap-3 rounded-2xl border border-line bg-card/80 px-4 py-3"><Avatar name={player.name} size={36} /><div className="text-left"><div className="text-sm font-medium">{player.name}</div><div className="text-xs text-mute">Ranked 1v1</div></div><RatingBadge elo={player.elo} /></div>
           <Button variant="secondary" className="mt-8" onClick={onCancel}>Cancel match</Button>
         </main>
@@ -53,9 +38,7 @@ export function Matchmaking({ player, opp, onCancel, onReady }: { player: Player
             <div className="animate-pop text-5xl font-semibold italic tracking-tight text-white/90 [animation-delay:500ms] sm:text-8xl"><span className="bg-gradient-to-b from-white to-white/20 bg-clip-text text-transparent">VS</span></div>
             <div className="animate-slide-r"><PlayerCard big name={opp.name} elo={opp.elo} ring="#F07878" /></div>
           </div>
-          <p className="mt-10 animate-fade-in text-sm text-mute [animation-delay:900ms]">Round begins in a moment · <span className="text-mute/70">Demo: simulated opponent</span></p>
-          <div className="mt-4 h-1 w-40 overflow-hidden rounded-full bg-line"><div className="h-full origin-left bg-win" style={{ animation: "orbitgrow 3.4s linear both" }} /></div>
-          <style>{'@keyframes orbitgrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}'}</style>
+          <p className="mt-10 animate-fade-in text-sm text-mute [animation-delay:900ms]">Round begins in a moment · <span className="capitalize text-mute/70">{opp.mode} opponent</span></p>
         </main>
       )}
     </div>

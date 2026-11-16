@@ -148,7 +148,7 @@ export function Transcripts({ myName, oppName, myText, oppText }: { myName: stri
       {[{ n: myName, t: myText, c: '#638BFF' }, { n: oppName, t: oppText, c: '#F07878' }].map((x) => (
         <div key={x.n} className="rounded-xl border border-line bg-card2/50 p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium"><i className="size-2 rounded-full" style={{ background: x.c }} />{x.n}</div>
-          <p className="text-[15px] leading-relaxed text-ink/90">{x.t}</p>
+          <p className="text-[15px] leading-relaxed text-ink/90">{x.t || 'No answer submitted.'}</p>
         </div>
       ))}
     </div>

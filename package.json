@@ -10,7 +10,6 @@
     "format": "oxfmt"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.3.2",
     "@supabase/supabase-js": "^2.119.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

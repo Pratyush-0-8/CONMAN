@@ -2,11 +2,14 @@ export const CATS = ['Logic', 'Creativity', 'Relevance', 'Clarity', 'Depth'] as 
 export type Cat = (typeof CATS)[number]
 export type Scores = Record<Cat, number>
 export type Outcome = 'win' | 'loss' | 'draw'
+export type InputMode = 'voice' | 'typing'
 
-export interface PlayerStats { name: string; elo: number; wins: number; losses: number; draws: number }
-export interface Opponent { name: string; elo: number; wins: number; losses: number; simulated: boolean }
+export interface PlayerStats { id?: string; name: string; elo: number; wins: number; losses: number; draws: number }
+export interface Opponent { name: string; elo: number; wins: number; losses: number; mode?: InputMode }
 export interface MatchRecord {
   id: string
+  myMode: InputMode
+  oppMode: InputMode
   opponent: string
   opponentElo: number
   outcome: Outcome
@@ -45,38 +48,9 @@ export function eloDelta(me: number, opp: number, outcome: Outcome) {
   return Math.round(32 * (s - exp))
 }
 
-const rnd = (a: number, b: number) => Math.round((a + Math.random() * (b - a)) * 10) / 10
-const clamp = (n: number) => Math.min(9.9, Math.max(2, Math.round(n * 10) / 10))
-
-export function genScores(outcome: Outcome) {
-  const base = {} as Scores
-  CATS.forEach((c) => (base[c] = rnd(4.5, 7.2)))
-  const other = {} as Scores
-  CATS.forEach((c) => (other[c] = clamp(base[c] + rnd(-0.8, 0.8))))
-  let a = base, b = other
-  if (outcome === 'draw') {
-    // same total, different shape: swap two categories' values
-    b = { ...base, Logic: base.Creativity, Creativity: base.Logic, Depth: base.Clarity, Clarity: base.Depth }
-  } else {
-    const k = CATS[Math.floor(Math.random() * CATS.length)]
-    b = { ...other, [k]: clamp(base[k] + rnd(1.8, 2.6)) }
-    while (total(b) - total(a) < 1.2) { const c = CATS[Math.floor(Math.random() * 5)]; b[c] = clamp(b[c] + 0.4) }
-  }
-  // a = loser/neutral, b = winner/neutral
-  const mine = outcome === 'win' ? b : a
-  const theirs = outcome === 'win' ? a : outcome === 'loss' ? b : b
-  return { mine, theirs, key: decisiveKey(mine, theirs, outcome) }
-}
-
 export function decisiveKey(mine: Scores, theirs: Scores, outcome: Outcome) {
   if (outcome === 'draw') return 'Balanced'
   return [...CATS].sort((x, y) => Math.abs(mine[y] - theirs[y]) - Math.abs(mine[x] - theirs[x]))[0]
-}
-
-export function pickOutcome(pref: Outcome | 'random'): Outcome {
-  if (pref !== 'random') return pref
-  const r = Math.random()
-  return r < 0.5 ? 'win' : r < 0.9 ? 'loss' : 'draw'
 }
 
 export function timeAgo(ts: number) {

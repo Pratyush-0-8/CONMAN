@@ -45,11 +45,11 @@ interface Recognition {
 }
 type SpeechWindow = Window & { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition }
 
-export function useSpeech() {
-  const [text, setText] = useState('')
+export function useSpeech(initialText = '') {
+  const [text, setText] = useState(initialText)
   const [status, setStatus] = useState<MicStatus>('starting')
   const [attempt, setAttempt] = useState(0)
-  const transcript = useRef('')
+  const transcript = useRef(initialText)
   const stop = useRef<() => Promise<string>>(() => Promise.resolve(transcript.current))
 
   useEffect(() => {

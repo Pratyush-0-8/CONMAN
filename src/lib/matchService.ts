@@ -1,51 +1,65 @@
-import { type MatchRecord, type Outcome, type PlayerStats, eloDelta, genScores, pickOutcome } from './game'
-import { QUESTIONS, makeOpponent } from './mock'
+import { type InputMode, type MatchRecord, type PlayerStats, type Scores } from './game'
 import { supabase } from './supabase'
 
-type Profile = { player: PlayerStats; history: MatchRecord[] }
-const PROFILES = 'conman.profiles.v1'
-
-// Local mock boundaries: replace profile/match calls with Supabase and evaluation with Gemini.
-function readProfiles(): Record<string, Profile> {
-  try { return JSON.parse(localStorage.getItem(PROFILES) || '{}') } catch { return {} }
+export interface RankedPlayer {
+  player_id: string; username: string; elo?: number; wins?: number; losses?: number; input_mode: InputMode; deadline: string; locked_at: string | null
+  answer_text?: string; scores: Scores | null; total: number | null; elo_before: number | null; elo_after: number | null; delta: number | null
+}
+export interface RankedMatch {
+  id: string; player1_id: string; player2_id: string; question: string
+  state: 'active' | 'judge_pending' | 'judging' | 'judge_error' | 'complete'
+  round_start: string; completed_at: string | null; players: RankedPlayer[]
+  judge_error: string | null; judge_retry_at: string | null; judge_attempts: number
+  result: { model: string; winner: 'player1' | 'player2' | 'draw'; decisiveCategory: string } | null
+}
+export interface RankedState {
+  match: RankedMatch | null
+  queue: { input_mode: InputMode; joined_at: string } | null
+  server_now: string
+  clockOffset: number
 }
 
-export function loadProfile(userId: string) { return readProfiles()[userId] }
-export async function loadSupabaseProfile(userId: string) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('username, elo, wins, losses')
-    .eq('id', userId)
-    .single()
-
-  if (error) throw error
-
-  return {
-    name: data.username,
-    elo: data.elo,
-    wins: data.wins,
-    losses: data.losses,
-    draws: 0,
-  }
+async function rpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  const { data, error } = await supabase.rpc(name, args)
+  if (error) throw new Error(error.message)
+  return data as T
+}
+export async function getRankedState(): Promise<RankedState> {
+  const before = Date.now()
+  const state = await rpc<Omit<RankedState, 'clockOffset'>>('ranked_state')
+  return { ...state, clockOffset: Date.parse(state.server_now) - (before + Date.now()) / 2 }
+}
+export async function requestJudgment(id: string) {
+  const { error } = await supabase.functions.invoke('clever-action', { body: { matchId: id } })
+  if (error) throw new Error('The judge is temporarily unavailable. Your answers are saved; retry judging.')
+}
+export async function loadSupabaseProfile(userId: string): Promise<PlayerStats> {
+  const { data, error } = await supabase.from('profiles').select('id,username,elo,wins,losses,draws').eq('id', userId).single()
+  if (error) throw new Error(error.message)
+  return { id: data.id, name: data.username, elo: data.elo, wins: data.wins, losses: data.losses, draws: data.draws }
+}
+export function matchRecord(match: Pick<RankedMatch, 'id' | 'player1_id' | 'question' | 'players' | 'completed_at'> & { result?: RankedMatch['result']; judge_result?: RankedMatch['result'] }, userId: string): MatchRecord {
+  const mine = match.players.find((p) => p.player_id === userId)!
+  const other = match.players.find((p) => p.player_id !== userId)!
+  const result = match.result || match.judge_result!
+  const outcome = result.winner === 'draw' ? 'draw' : ((match.player1_id === userId) === (result.winner === 'player1') ? 'win' : 'loss')
+  return { id: match.id, myMode: mine.input_mode, oppMode: other.input_mode, opponent: other.username, opponentElo: other.elo_before!, outcome,
+    delta: mine.delta!, eloBefore: mine.elo_before!, eloAfter: mine.elo_after!, at: Date.parse(match.completed_at!), question: match.question,
+    myText: mine.answer_text || '', oppText: other.answer_text || '', mine: mine.scores!, theirs: other.scores!, key: result.decisiveCategory }
+}
+export async function loadHistory(userId: string) {
+  const matches = await rpc<Parameters<typeof matchRecord>[0][]>('ranked_history')
+  return matches.map((match) => matchRecord(match, userId))
+}
+export function subscribeRanked(userId: string, refresh: () => void) {
+  const channel = supabase.channel(`ranked:${userId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ranked_players', filter: `player_id=eq.${userId}` }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ranked_queue', filter: `player_id=eq.${userId}` }, refresh)
+    .subscribe((status) => { if (status === 'SUBSCRIBED') refresh() })
+  return () => { void supabase.removeChannel(channel) }
 }
 
-export function saveProfile(userId: string, profile: Profile) {
-  try { localStorage.setItem(PROFILES, JSON.stringify({ ...readProfiles(), [userId]: profile })) } catch { /* Keep the in-memory demo working when storage is unavailable. */ }
-}
-
-export function findMatch(elo: number, previousQuestion: number) {
-  const questionIndex = (previousQuestion + 1 + Math.floor(Math.random() * (QUESTIONS.length - 1))) % QUESTIONS.length
-  return { id: crypto.randomUUID(), opponent: makeOpponent(elo), questionIndex }
-}
-
-export function evaluateMatch(pref: Outcome | 'random') {
-  const outcome = pickOutcome(pref)
-  return { outcome, ...genScores(outcome) }
-}
-
-export function submitMatch({ id, player, opponent, questionIndex, text, pref }: ReturnType<typeof findMatch> & { player: PlayerStats; text: string; pref: Outcome | 'random' }): MatchRecord {
-  const evaluation = evaluateMatch(pref)
-  const delta = Math.max(-player.elo, eloDelta(player.elo, opponent.elo, evaluation.outcome))
-  const question = QUESTIONS[questionIndex]
-  return { id, opponent: opponent.name, opponentElo: opponent.elo, delta, eloBefore: player.elo, eloAfter: player.elo + delta, at: Date.now(), question: question.q, myText: text.trim() || 'No speech detected.', oppText: question.theirs, ...evaluation }
-}
+export const saveAnswer = (id: string, text: string, final: boolean) => rpc<void>('ranked_answer', { p_match: id, p_text: text, p_final: final })
+export const queueMatch = (mode: InputMode, join = false) => rpc<string | null>('ranked_queue_match', { p_mode: mode, p_join: join })
+export const cancelQueue = () => rpc<void>('ranked_cancel_queue')
+export const releaseMatch = (id: string) => rpc<void>('ranked_release', { p_match: id })

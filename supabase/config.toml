@@ -1,0 +1,3 @@
+# Auth is validated explicitly with Supabase Auth in the function (supports current signing keys).
+[functions.clever-action]
+verify_jwt = false

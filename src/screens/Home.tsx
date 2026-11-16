@@ -1,17 +1,14 @@
 import { Avatar, Button, Card, Eyebrow, Icon, RatingBadge } from '../components/ui'
 import { LeaderboardRow, MatchEntry } from '../components/lists'
-import { type MatchRecord, type Outcome, type PlayerStats, gamesOf, rankFor, winRate } from '../lib/game'
-import { LEADERBOARD } from '../lib/mock'
-import { buildBoard } from '../lib/board'
+import { type MatchRecord, type InputMode, type PlayerStats, gamesOf, rankFor, winRate } from '../lib/game'
+import { useLeaderboard } from '../lib/board'
 import type { Page } from '../components/Nav'
 
-export type OutcomePref = Outcome | 'random'
-
-export function Home({ player, history, pref, setPref, onDemo, onPlay, go, openMatch }: {
-  player: PlayerStats; history: MatchRecord[]; pref: OutcomePref; setPref: (p: OutcomePref) => void
-  onDemo: () => void; onPlay: () => void; go: (p: Page) => void; openMatch: (m: MatchRecord) => void
+export function Home({ player, history, mode, setMode, onPlay, go, openMatch }: {
+  player: PlayerStats; history: MatchRecord[]; mode: InputMode; setMode: (p: InputMode) => void
+  onPlay: () => void; go: (p: Page) => void; openMatch: (m: MatchRecord) => void
 }) {
-  const board = buildBoard(player)
+  const { board, error: boardError } = useLeaderboard(player)
   const me = board.find((b) => b.me)
   const rank = player ? rankFor(player.elo) : null
   return (
@@ -23,8 +20,9 @@ export function Home({ player, history, pref, setPref, onDemo, onPlay, go, openM
         <svg className="pointer-events-none absolute left-1/2 top-4 -z-10 -translate-x-1/2 opacity-[0.07]" width="720" height="360" viewBox="0 0 32 16" fill="none"><circle cx="12" cy="8" r="7.5" stroke="#fff" strokeWidth=".15" /><circle cx="20" cy="8" r="7.5" stroke="#fff" strokeWidth=".15" /></svg>
         <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-line bg-card/70 px-3.5 py-1.5 text-xs text-mute"><span className="size-1.5 animate-blink rounded-full bg-win" />Ranked 1v1 · Season 1 open</div>
         <h1 className="animate-fade-up mx-auto mt-6 max-w-3xl text-5xl font-semibold leading-[1.02] tracking-tight [animation-delay:80ms] sm:text-7xl">Think fast.<br /><span className="text-accent">Speak sharper.</span></h1>
-        <p className="animate-fade-up mx-auto mt-5 max-w-lg text-base text-mute [animation-delay:160ms] sm:text-lg">Twenty seconds. One strange question. Out-reason a rival in real time and climb the ranks.</p>
+        <p className="animate-fade-up mx-auto mt-5 max-w-lg text-base text-mute [animation-delay:160ms] sm:text-lg">One strange question. Voice or typing. Out-reason a rival in real time and climb the ranks.</p>
         <div className="animate-fade-up mt-10 flex flex-col items-center [animation-delay:240ms]">
+          <div aria-label="Input mode" className="mb-4 flex rounded-xl border border-line bg-card p-1">{(['voice','typing'] as InputMode[]).map((value) => <button key={value} onClick={() => setMode(value)} aria-pressed={mode === value} className={`rounded-lg px-5 py-2 text-sm capitalize ${mode === value ? 'bg-accent text-white' : 'text-mute'}`}>{value}</button>)}</div>
           {(
             <>
               <button onClick={onPlay} className="group relative inline-flex h-20 items-center gap-4 rounded-2xl bg-accent px-12 text-xl font-semibold text-white shadow-[0_20px_60px_-12px_rgba(99,139,255,0.8)] transition-all hover:-translate-y-1 hover:bg-[#7a9cff] active:scale-[0.98] max-sm:w-full max-sm:justify-center">
@@ -60,32 +58,26 @@ export function Home({ player, history, pref, setPref, onDemo, onPlay, go, openM
           <div className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full bg-accent/10 blur-3xl" />
           <div className="flex items-start justify-between"><div><Eyebrow className="!text-accent">Mode</Eyebrow><h3 className="mt-1 text-2xl font-semibold">Ranked 1v1</h3><p className="mt-1 max-w-sm text-sm text-mute">Same question for both players. Judged on five dimensions of reasoning. ELO on the line.</p></div><Icon name="trophy" size={28} className="text-accent" /></div>
           <div className="mt-6 grid grid-cols-3 gap-3">
-            {[['5s', 'Think', '#638BFF'], ['15s', 'Speak', '#F07878'], ['5', 'Criteria', '#38C994']].map(([n, l, c]) => (
+            {[['5s', 'Think', '#638BFF'], [mode === 'voice' ? '15s' : '20s', mode === 'voice' ? 'Speak' : 'Type', '#F07878'], ['5', 'Criteria', '#38C994']].map(([n, l, c]) => (
               <div key={l} className="rounded-xl border border-line bg-card2/60 p-4"><div className="text-2xl font-semibold tabular" style={{ color: c }}>{n}</div><div className="text-xs text-mute">{l}</div></div>))}
           </div>
-          <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-4 text-xs text-mute">
-            <span>Demo outcome</span>
-            <div className="flex rounded-lg border border-line bg-bg p-0.5">
-              {(['random', 'win', 'loss', 'draw'] as OutcomePref[]).map((o) => (
-                <button key={o} onClick={() => setPref(o)} className={`rounded-md px-3 py-1 capitalize transition-colors ${pref === o ? 'bg-card2 text-ink' : 'hover:text-ink'}`}>{o}</button>))}
-            </div>
-            <span className="basis-full sm:basis-auto">Opponents are simulated in this prototype.</span>
-          </div>
+          <p className="mt-6 border-t border-line pt-4 text-xs text-mute">Voice and Typing share one ranked pool and ELO.</p>
         </Card>
 
         <Card className="p-3 lg:col-span-2">
           <div className="flex items-center justify-between px-3 pb-1 pt-3"><Eyebrow>Recent matches</Eyebrow><button onClick={() => go('history')} className="text-xs text-accent hover:underline">View all</button></div>
           {history.length ? history.slice(0, 4).map((m) => <MatchEntry key={m.id} m={m} onClick={() => openMatch(m)} />) :
-            <div className="px-4 py-12 text-center text-sm text-mute">No matches yet. Your first one is a click away.<div><button onClick={onDemo} className="mt-3 text-accent hover:underline">Preview with sample history</button></div></div>}
+            <div className="px-4 py-12 text-center text-sm text-mute">No matches yet. Your first one is a click away.</div>}
         </Card>
 
         <Card className="p-3">
           <div className="flex items-center justify-between px-3 pb-2 pt-3"><Eyebrow>Top players</Eyebrow><button onClick={() => go('leaderboard')} className="text-xs text-accent hover:underline">Leaderboard</button></div>
+          {boardError && <p role="alert" className="p-3 text-sm text-mute">{boardError}</p>}
           {board.slice(0, 5).map((p) => <LeaderboardRow key={p.name} p={p} compact />)}
           {me && me.rank > 5 && <><div className="px-3 py-1 text-center text-mute">···</div><LeaderboardRow p={me} compact /></>}
         </Card>
       </section>
-      <p className="mt-10 text-center text-xs text-mute/70">{LEADERBOARD.length} ranked players shown are mock data · {player ? gamesOf(player) : 0} matches played</p>
+      <p className="mt-10 text-center text-xs text-mute/70">{player ? gamesOf(player) : 0} matches played</p>
     </div>
   )
 }

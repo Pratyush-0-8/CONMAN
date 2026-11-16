@@ -22,7 +22,7 @@ export function MatchEntry({ m, onClick, showQuestion = true }: { m: MatchRecord
       <Avatar name={m.opponent} size={38} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="text-sm font-medium">vs {m.opponent}</span><OutcomePill o={m.outcome} />
+          <span className="text-sm font-medium">vs {m.opponent}</span><span className="text-[11px] capitalize text-mute">{m.myMode} vs {m.oppMode}</span><OutcomePill o={m.outcome} />
         </div>
         {showQuestion ? <div className="mt-1 truncate font-serif text-[15px] text-mute">{m.question}</div> : <div className="mt-1 text-xs text-mute">{dateTime(m.at)}</div>}
       </div>
@@ -43,9 +43,9 @@ export function MatchDetailDialog({ m, me, onClose }: { m: MatchRecord | null; m
           <div className="flex items-center gap-3"><OutcomePill o={m.outcome} /><span className="text-sm text-mute">{dateTime(m.at)}</span></div>
           <h3 className="mt-4 max-w-xl font-serif text-2xl leading-tight sm:text-3xl">{m.question}</h3>
           <div className="mt-5 flex flex-wrap items-center gap-4 rounded-xl border border-line bg-card2/50 p-4 text-sm">
-            <span className="font-medium">{me}</span>
+            <span className="font-medium">{me} · {m.myMode}</span>
             <span className="text-mute">vs</span>
-            <span className="font-medium">{m.opponent}</span><RatingBadge elo={m.opponentElo} />
+            <span className="font-medium">{m.opponent} · {m.oppMode}</span><RatingBadge elo={m.opponentElo} />
             <span className="ml-auto flex items-center gap-2 tabular text-mute">{m.eloBefore} → {m.eloAfter} <Delta d={m.delta} /></span>
           </div>
           <div className="mt-6 flex items-center gap-2"><Eyebrow>Decisive category</Eyebrow><span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-accent">{m.key}</span></div>
@@ -60,9 +60,9 @@ export function MatchDetailDialog({ m, me, onClose }: { m: MatchRecord | null; m
 
 /* ---------- Leaderboard row ---------- */
 const PODIUM = ['#E8C06A', '#C3CAD8', '#C98B5E']
-export interface LbEntry { name: string; elo: number; wins: number; losses: number; rank: number; me?: boolean }
+export interface LbEntry { name: string; elo: number; wins: number; losses: number; draws?: number; rank: number; me?: boolean }
 export function LeaderboardRow({ p, compact }: { p: LbEntry; compact?: boolean }) {
-  const g = p.wins + p.losses
+  const g = p.wins + p.losses + (p.draws || 0)
   const wr = g ? Math.round((p.wins / g) * 100) : 0
   const pod = p.rank <= 3 ? PODIUM[p.rank - 1] : null
   return (
@@ -73,7 +73,7 @@ export function LeaderboardRow({ p, compact }: { p: LbEntry; compact?: boolean }
         <div className="min-w-0"><div className="truncate text-sm font-medium">{p.name}{p.me && <span className="ml-2 rounded bg-accent px-1.5 py-0.5 align-middle text-[10px] font-semibold text-white">YOU</span>}</div>
           {!compact && <div className="text-[11px] text-mute sm:hidden">{p.wins}W {p.losses}L · {wr}%</div>}</div>
       </div>
-      {!compact && <div className="hidden text-right text-sm tabular text-mute sm:block">{p.wins}W – {p.losses}L</div>}
+      {!compact && <div className="hidden text-right text-sm tabular text-mute sm:block">{p.wins}W – {p.losses}L{p.draws ? ` – ${p.draws}D` : ''}</div>}
       {!compact && <div className="hidden sm:block"><div className="ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-line"><div className="h-full bg-win/80" style={{ width: `${wr}%` }} /></div></div>}
       {!compact && <div className="hidden text-right text-sm tabular sm:block">{wr}%</div>}
       <div className="text-right"><div className="font-semibold tabular">{p.elo}</div>{!compact && <div className="text-[11px] text-mute sm:hidden">{rankFor(p.elo).name}</div>}</div>

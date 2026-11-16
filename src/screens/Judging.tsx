@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react'
 import { CATS, type Opponent, type PlayerStats } from '../lib/game'
-import { Avatar, Icon, Logo, Wordmark } from '../components/ui'
+import { Avatar, Banner, Button, Icon, Logo, Wordmark } from '../components/ui'
 
 const DESC = { Logic: 'Is the argument sound?', Creativity: 'Is the angle original?', Relevance: 'Does it answer the prompt?', Clarity: 'Is it easy to follow?', Depth: 'How far does it go?' } as Record<string, string>
 
-export function Judging({ player, opp, question, myText, oppText, onDone }: { player: PlayerStats; opp: Opponent; question: string; myText: string; oppText: string; onDone: () => void }) {
+export function Judging({ player, opp, question, myText, oppText, error, retryAt, onRetry }: { player: PlayerStats; opp: Opponent; question: string; myText: string; oppText: string; error: string | null; retryAt: string | null; onRetry: () => void }) {
   const [i, setI] = useState(0)
+  const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const id = setInterval(() => setI((x) => x + 1), 900)
-    const done = setTimeout(onDone, 5200)
-    return () => { clearInterval(id); clearTimeout(done) }
-  }, [onDone])
+    const id = setInterval(() => { setI((x) => (x + 1) % 5); setNow(Date.now()) }, 900)
+    return () => clearInterval(id)
+  }, [])
   const card = (name: string, text: string, c: string, delay: string) => (
     <div className="animate-fade-up rounded-2xl border border-line bg-card p-5 [animation-delay:var(--d)]" style={{ ['--d' as any]: delay }}>
       <div className="mb-3 flex items-center gap-3"><Avatar name={name} size={32} ring={c} /><span className="text-sm font-medium">{name}</span><span className="ml-auto flex items-center gap-1 text-[11px] text-mute"><Icon name="check" size={13} className="text-win" />Submitted</span></div>
-      <p className="line-clamp-5 text-[15px] leading-relaxed text-ink/85">{text || 'No speech detected.'}</p>
+      <p className="line-clamp-5 text-[15px] leading-relaxed text-ink/85">{text || 'No answer submitted.'}</p>
     </div>
   )
   return (
@@ -22,6 +22,7 @@ export function Judging({ player, opp, question, myText, oppText, onDone }: { pl
       <div className="pointer-events-none absolute inset-0 bg-grid" />
       <header className="relative z-10 flex h-16 items-center px-5 sm:px-8"><Wordmark /></header>
       <main className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-8 px-4 pb-12 sm:px-8">
+        {error && <Banner tone="error" title="Judging is pending" action={<Button size="sm" disabled={!!retryAt && Date.parse(retryAt)>now} onClick={onRetry}>Retry</Button>}>{error}{retryAt && Date.parse(retryAt)>now ? ' Retry will be available shortly.' : ''} No ratings have been awarded.</Banner>}
         <div className="grid w-full gap-4 md:grid-cols-[1fr_auto_1fr] md:items-center md:gap-8">
           {card(player.name, myText, '#638BFF', '0ms')}
           {/* Judging core */}

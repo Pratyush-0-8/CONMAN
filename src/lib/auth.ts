@@ -17,9 +17,6 @@ export class AuthError extends Error {
   }
 }
 
-// Kept temporarily so existing imports don't break.
-export const DEMO_EMAIL = ''
-
 export const validators = {
   username: (v: string) =>
     v.length < 3 || v.length > 20
