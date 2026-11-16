@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Banner, Button, Eyebrow, Wordmark } from '../components/ui'
 import { CountdownRing, LinearTimer, MicIndicator, PlayerCard, PromptCard, RecordingStatus, TranscriptPanel, Waveform, useCountdown } from '../components/game'
 import { useSpeech } from '../lib/speech'
@@ -17,11 +17,18 @@ function Think({ onDone }: { onDone: () => void }) {
   )
 }
 
-function Speak({ sample, onDone }: { sample: string; onDone: (t: string) => void }) {
-  const sp = useSpeech(sample)
-  const [retry, setRetry] = useState(false)
-  const left = useCountdown(15, () => onDone(sp.final))
-  const bad = sp.status !== 'listening'
+function Speak({ onDone }: { onDone: (t: string) => void }) {
+  const sp = useSpeech()
+  const finished = useRef(false)
+  const mounted = useRef(false)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const left = useCountdown(15, () => {
+    if (finished.current) return
+    finished.current = true
+    void sp.finish().then((text) => { if (mounted.current) onDone(text) })
+  })
+  const recording = sp.status === 'listening'
+  const bad = sp.status === 'denied' || sp.status === 'unsupported' || sp.status === 'error'
   return (
     <div className="grid w-full animate-fade-in gap-5 md:grid-cols-[auto_1fr] md:items-center md:gap-10">
       <div className="flex flex-col items-center gap-3 md:gap-5">
@@ -29,30 +36,30 @@ function Speak({ sample, onDone }: { sample: string; onDone: (t: string) => void
       </div>
       <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <MicIndicator off={bad} />
-          <div className="min-w-0 flex-1"><Waveform active color={bad ? '#9299A8' : RED} /></div>
+          <MicIndicator off={!recording} />
+          <div className="min-w-0 flex-1"><Waveform active={recording} color={recording ? RED : '#9299A8'} /></div>
         </div>
         <div className="flex items-center justify-between">
-          {bad ? <span className="text-xs font-medium text-mute">Demo transcript</span> : <RecordingStatus label="Recording" />}
+          {recording ? <RecordingStatus label="Recording" /> : <span role="status" className="text-xs font-medium text-mute">{sp.status === 'starting' ? 'Starting speech recognition…' : sp.status === 'stopped' ? 'Submitting transcript…' : 'Speech recognition unavailable'}</span>}
           <span className="text-xs text-mute tabular">{(15 - left / 1000).toFixed(1)}s / 15s</span>
         </div>
         <LinearTimer left={left} total={15} color={RED} />
-        {sp.status === 'denied' && !retry && (
-          <Banner tone="error" title="Microphone access was blocked" action={<Button size="sm" variant="ghost" onClick={() => setRetry(true)}>Dismiss</Button>}>Allow the microphone in your browser to speak your answer. A simulated transcript is shown so you can continue the demo.</Banner>
+        {sp.status === 'denied' && (
+          <Banner tone="error" title="Speech recognition was blocked" action={<Button size="sm" variant="ghost" disabled={left === 0} onClick={sp.retry}>Retry</Button>}>Allow microphone and speech recognition access in your browser’s site settings. Only words actually recognized will be submitted.</Banner>
         )}
-        {sp.status === 'unsupported' && !retry && (
-          <Banner title="Speech recognition unavailable" action={<Button size="sm" variant="ghost" onClick={() => setRetry(true)}>Dismiss</Button>}>This browser doesn’t support the Web Speech API. Try Chrome or Edge. Showing a simulated transcript for now.</Banner>
+        {sp.status === 'unsupported' && (
+          <Banner title="Speech recognition unavailable">This browser doesn’t support the Web Speech API. Use a browser with speech recognition support, such as Chrome or Edge. No sample answer will be submitted.</Banner>
         )}
-        {sp.status === 'error' && !retry && (
-          <Banner tone="error" title="Couldn’t reach the microphone" action={<Button size="sm" variant="ghost" onClick={() => setRetry(true)}>Dismiss</Button>}>Check that an input device is connected. Continuing with a simulated transcript.</Banner>
+        {sp.status === 'error' && (
+          <Banner tone="error" title="Speech recognition interrupted" action={<Button size="sm" variant="ghost" disabled={left === 0} onClick={sp.retry}>Retry</Button>}>Check your microphone and internet connection, then retry within the remaining time. Your transcript so far is preserved.</Banner>
         )}
-        <TranscriptPanel text={sp.text} live placeholder="Start speaking. Your words appear here in real time…" />
+        <TranscriptPanel text={sp.text} live={recording} placeholder={bad ? 'No speech recognized. Only your spoken words will appear here.' : 'Start speaking. Your words appear here in real time…'} />
       </div>
     </div>
   )
 }
 
-export function Arena({ player, opp, question, sample, onDone }: { player: PlayerStats; opp: Opponent; question: string; sample: string; onDone: (text: string) => void }) {
+export function Arena({ player, opp, question, onDone }: { player: PlayerStats; opp: Opponent; question: string; onDone: (text: string) => void }) {
   const [phase, setPhase] = useState<'think' | 'speak'>('think')
   return (
     <div className="relative flex min-h-screen flex-col">
@@ -78,7 +85,7 @@ export function Arena({ player, opp, question, sample, onDone }: { player: Playe
       <main className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center gap-6 px-4 py-6 sm:gap-10 sm:px-8 sm:py-10">
         <div className="animate-fade-up"><PromptCard question={question} compact={phase === 'speak'} /></div>
         <div key={phase} className="flex justify-center">
-          {phase === 'think' ? <Think onDone={() => setPhase('speak')} /> : <Speak sample={sample} onDone={onDone} />}
+          {phase === 'think' ? <Think onDone={() => setPhase('speak')} /> : <Speak onDone={onDone} />}
         </div>
         <Eyebrow className="text-center !text-mute/50">Ranked · Round 1 of 1 · {phase === 'think' ? 'Preparing' : 'Recording'}</Eyebrow>
       </main>

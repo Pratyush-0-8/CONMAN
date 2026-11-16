@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Nav, type Page } from './components/Nav'
-import { Button } from './components/ui'
+import { Banner, Button, Dialog, Spinner } from './components/ui'
 import { MatchDetailDialog } from './components/lists'
 import { Home, type OutcomePref } from './screens/Home'
 import { Matchmaking } from './screens/Matchmaking'
@@ -8,15 +8,15 @@ import { Arena } from './screens/Arena'
 import { Judging } from './screens/Judging'
 import { Results } from './screens/Results'
 import { History, Leaderboard, Profile } from './screens/Pages'
-import { type MatchRecord, type Opponent, type PlayerStats, START_ELO, eloDelta, genScores, pickOutcome } from './lib/game'
-import { QUESTIONS, demoSeed, makeOpponent } from './lib/mock'
+import { type MatchRecord, type Opponent, type PlayerStats, START_ELO } from './lib/game'
+import { QUESTIONS, demoSeed } from './lib/mock'
+import { findMatch, loadProfile, saveProfile, submitMatch } from './lib/matchService'
+import { requestMicrophone } from './lib/speech'
 import { type AuthUser, signOut, verifyEmail } from './lib/auth'
 import { Forgot, Landing, ResetSent, SignIn, SignUp, VerifyInvalid, VerifyPending, type AuthRoute } from './screens/Auth'
 
 type Stage = 'idle' | 'search' | 'arena' | 'judging' | 'results'
 // Per-user gameplay data (stats + history). No credentials are ever stored here.
-const PROFILES = 'conman.profiles.v1'
-const readProfiles = (): Record<string, { player: PlayerStats; history: MatchRecord[] }> => { try { return JSON.parse(localStorage.getItem(PROFILES) || '{}') } catch { return {} } }
 const PROTECTED: Page[] = ['home', 'history', 'profile']
 
 export default function App() {
@@ -29,59 +29,91 @@ export default function App() {
   const [player, setPlayer] = useState<PlayerStats | null>(null)
   const [history, setHistory] = useState<MatchRecord[]>([])
   const [page, setPage] = useState<Page>('home')
-  const [stage, setStage] = useState<Stage>('idle')
+  const [stage, setStageState] = useState<Stage>('idle')
+  const stageRef = useRef<Stage>('idle')
+  const setStage = useCallback((next: Stage) => { stageRef.current = next; setStageState(next) }, [])
   const [pref, setPref] = useState<OutcomePref>('random')
   const [opp, setOpp] = useState<Opponent | null>(null)
   const [qi, setQi] = useState(0)
   const [result, setResult] = useState<MatchRecord | null>(null)
   const [detail, setDetail] = useState<MatchRecord | null>(null)
-  const myText = useRef('')
+  const [micPending, setMicPending] = useState(false)
+  const [micError, setMicError] = useState('')
+  const permissionAttempt = useRef(0)
+  const requestingMic = useRef(false)
+  const activeMatch = useRef<ReturnType<typeof findMatch> | null>(null)
+  const submitted = useRef(false)
 
   useEffect(() => {
     if (!user || !player) return
-    localStorage.setItem(PROFILES, JSON.stringify({ ...readProfiles(), [user.id]: { player, history } }))
+    saveProfile(user.id, { player, history })
   }, [user, player, history])
   useEffect(() => { window.scrollTo({ top: 0 }) }, [page, stage])
+  useEffect(() => () => { permissionAttempt.current++ }, [])
+
+  const cancelMic = () => { permissionAttempt.current++; requestingMic.current = false; setMicPending(false); setMicError('') }
 
   // Single shared profile: the username always comes from the signed-in account.
   const enter = (u: AuthUser) => {
-    const saved = readProfiles()[u.id]
+    const saved = loadProfile(u.id)
     if (saved) { setPlayer({ ...saved.player, name: u.username }); setHistory(saved.history) }
     else if (u.id === 'demo') { const s = demoSeed(); setPlayer({ ...s.player, name: u.username }); setHistory(s.history) }
     else { setPlayer({ name: u.username, elo: START_ELO, wins: 0, losses: 0, draws: 0 }); setHistory([]) }
     setUser(u); setPending(null); setNotice(''); setPage('home'); setRoute('app')
   }
-  const logout = async () => { await signOut(); setUser(null); setPlayer(null); setHistory([]); setStage('idle'); setPage('home'); setRoute('landing') }
+  const logout = async () => { cancelMic(); activeMatch.current = null; setStage('idle'); await signOut(); setUser(null); setPlayer(null); setHistory([]); setPage('home'); setRoute('landing') }
   const toAuth = (r: AuthRoute, n = '') => { setNotice(n); setRoute(r) }
   const demo = () => { if (!user) return; const s = demoSeed(); setPlayer({ ...s.player, name: user.username }); setHistory(s.history) }
-  const go = (p: Page) => { if (!user && PROTECTED.includes(p)) return toAuth('signin', 'Sign in to continue.'); setPage(p); setRoute('app') }
-  const play = () => {
+  const go = (p: Page) => { cancelMic(); if (!user && PROTECTED.includes(p)) return toAuth('signin', 'Sign in to continue.'); setPage(p); setRoute('app') }
+  const play = async () => {
     if (!user || !player) return toAuth('signin', 'Sign in to find a match.')
-    setOpp(makeOpponent(player.elo)); setQi((q) => (q + 1 + Math.floor(Math.random() * (QUESTIONS.length - 1))) % QUESTIONS.length)
-    setStage('search')
+    if (requestingMic.current || (stageRef.current !== 'idle' && stageRef.current !== 'results')) return
+    requestingMic.current = true
+    const attempt = ++permissionAttempt.current
+    setMicError(''); setMicPending(true)
+    try {
+      await requestMicrophone()
+      if (attempt !== permissionAttempt.current) return
+      const match = findMatch(player.elo, qi)
+      activeMatch.current = match; submitted.current = false
+      setResult(null); setOpp(match.opponent); setQi(match.questionIndex)
+      setStage('search')
+    } catch (error) {
+      if (attempt === permissionAttempt.current) setMicError(error instanceof Error ? error.message : 'Could not access your microphone. Check your settings, then retry.')
+    } finally {
+      if (attempt === permissionAttempt.current) { requestingMic.current = false; setMicPending(false) }
+    }
   }
-  const home = () => { setStage('idle'); setPage('home') }
+  const home = () => { cancelMic(); activeMatch.current = null; setStage('idle'); setPage('home') }
   const cb = { go: toAuth }
+  const matchId = activeMatch.current?.id
 
   const finishSpeaking = (text: string) => {
-    if (!player || !opp) return
-    const outcome = pickOutcome(pref)
-    const delta = eloDelta(player.elo, opp.elo, outcome)
-    const g = genScores(outcome)
-    const q = QUESTIONS[qi]
-    myText.current = text || 'No speech detected.'
-    const rec: MatchRecord = { id: String(Date.now()), opponent: opp.name, opponentElo: opp.elo, outcome, delta, eloBefore: player.elo, eloAfter: player.elo + delta, at: Date.now(), question: q.q, myText: myText.current, oppText: q.theirs, ...g }
-    setResult(rec); setHistory((h) => [rec, ...h])
-    setPlayer({ ...player, elo: rec.eloAfter, wins: player.wins + +(outcome === 'win'), losses: player.losses + +(outcome === 'loss'), draws: player.draws + +(outcome === 'draw') })
+    if (!player || !activeMatch.current || activeMatch.current.id !== matchId || stageRef.current !== 'arena' || submitted.current) return
+    submitted.current = true
+    const rec = submitMatch({ ...activeMatch.current, player, text, pref })
+    setResult(rec); setHistory((h) => h.some((m) => m.id === rec.id) ? h : [rec, ...h])
+    setPlayer((p) => p ? { ...p, elo: rec.eloAfter, wins: p.wins + +(rec.outcome === 'win'), losses: p.losses + +(rec.outcome === 'loss'), draws: p.draws + +(rec.outcome === 'draw') } : p)
     setStage('judging')
   }
-  const judged = useCallback(() => setStage('results'), [])
+  const judged = useCallback(() => { if (stageRef.current === 'judging') setStage('results') }, [setStage])
+  const withMicFeedback = (content: ReactNode) => (
+    <>
+      {content}
+      <Dialog open={micPending || !!micError} onClose={cancelMic} title="Microphone access">
+        <div className="pr-8">
+          <h2 className="mb-4 text-xl font-semibold">Microphone access</h2>
+          {micPending ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />Allow microphone access in your browser to find a match.</div> : <Banner tone="error" title="Microphone required" action={<Button size="sm" onClick={play}>Retry</Button>}>{micError}</Banner>}
+        </div>
+      </Dialog>
+    </>
+  )
 
   if (player && opp) {
-    if (stage === 'search') return <Matchmaking key={opp.name + qi} player={player} opp={opp} onCancel={home} onReady={() => setStage('arena')} />
-    if (stage === 'arena') return <Arena player={player} opp={opp} question={QUESTIONS[qi].q} sample={QUESTIONS[qi].mine} onDone={finishSpeaking} />
+    if (stage === 'search') return <Matchmaking key={matchId} player={player} opp={opp} onCancel={home} onReady={() => { if (stageRef.current === 'search' && activeMatch.current?.id === matchId) setStage('arena') }} />
+    if (stage === 'arena') return <Arena player={player} opp={opp} question={QUESTIONS[qi].q} onDone={finishSpeaking} />
     if (stage === 'judging' && result) return <Judging player={player} opp={opp} question={result.question} myText={result.myText} oppText={result.oppText} onDone={judged} />
-    if (stage === 'results' && result) return <Results m={result} me={player.name} onAgain={play} onHome={home} />
+    if (stage === 'results' && result) return withMicFeedback(<Results m={result} me={player.name} onAgain={play} onHome={home} />)
   }
 
   // Route guard: unauthenticated users only reach landing, auth screens and the public leaderboard.
@@ -105,7 +137,7 @@ export default function App() {
     return <Landing go={cb.go} onLeaderboard={() => { setPage('leaderboard'); setRoute('app') }} />
   }
 
-  return (
+  return withMicFeedback(
     <div className="min-h-screen">
       <Nav page={page} go={go} player={player} email={user.email} onPlay={play} onSignOut={logout} onSignIn={() => {}} onSignUp={() => {}} onLanding={() => {}} />
       <div key={page} className="animate-fade-in">

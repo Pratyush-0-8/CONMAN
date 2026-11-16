@@ -8,13 +8,20 @@ export function useCountdown(seconds: number, onDone: () => void) {
   const cb = useRef(onDone)
   cb.current = onDone
   useEffect(() => {
-    const start = performance.now()
-    const id = setInterval(() => {
-      const l = Math.max(0, seconds * 1000 - (performance.now() - start))
+    const deadline = Date.now() + seconds * 1000
+    let completed = false
+    setLeft(seconds * 1000)
+    const tick = () => {
+      if (completed) return
+      const l = Math.max(0, deadline - Date.now())
       setLeft(l)
-      if (l === 0) { clearInterval(id); cb.current() }
-    }, 50)
-    return () => clearInterval(id)
+      if (l === 0) { completed = true; clearInterval(id); clearTimeout(end); cb.current() }
+    }
+    const id = setInterval(tick, 50)
+    const end = setTimeout(tick, seconds * 1000)
+    window.addEventListener('focus', tick)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(id); clearTimeout(end); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick) }
   }, [seconds])
   return left
 }
