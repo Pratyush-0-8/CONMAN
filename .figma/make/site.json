@@ -1,0 +1,10 @@
+{
+  "description": "Challenge other players in fast-paced critical-thinking duels, track your ELO, and sharpen your reasoning through ranked matches and feedback.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
