@@ -10,10 +10,18 @@ import { Results } from './screens/Results'
 import { History, Leaderboard, Profile } from './screens/Pages'
 import { type MatchRecord, type Opponent, type PlayerStats, START_ELO } from './lib/game'
 import { QUESTIONS, demoSeed } from './lib/mock'
-import { findMatch, loadProfile, saveProfile, submitMatch } from './lib/matchService'
+import {
+  findMatch,
+  loadProfile,
+  loadSupabaseProfile,
+  saveProfile,
+  submitMatch
+} from './lib/matchService'
 import { requestMicrophone } from './lib/speech'
 import { type AuthUser, signOut, verifyEmail } from './lib/auth'
 import { Forgot, Landing, ResetSent, SignIn, SignUp, VerifyInvalid, VerifyPending, type AuthRoute } from './screens/Auth'
+import { supabase } from './lib/supabase'
+import { judgeAnswer } from "./lib/localJudge";
 
 type Stage = 'idle' | 'search' | 'arena' | 'judging' | 'results'
 // Per-user gameplay data (stats + history). No credentials are ever stored here.
@@ -21,6 +29,39 @@ const PROTECTED: Page[] = ['home', 'history', 'profile']
 
 export default function App() {
   // Session lives in memory only; Supabase Auth will restore it across refreshes.
+  async function testJudge() {
+    const { data, error } = await supabase.functions.invoke('clever-action', {
+      body: {
+        question: "Should robots have the same rights as humans?",
+        player1Answer: "Robots should have rights because robots are cool and they're probably going to take over anyway.",
+        player2Answer: "Rights should depend on the capacity to experience harm, not whether something is biological. If a robot could genuinely suffer, denying it protection would be difficult to justify.",
+      },
+    })
+
+    console.log('Judge result:', data)
+    console.log('Judge error:', error)
+  }
+
+  async function testLocalJudge() {
+    try {
+      console.log("Loading local AI judge...");
+
+      const start = performance.now();
+
+      const score = await judgeAnswer(
+        "Should robots have the same rights as humans?",
+        "Robots should have rights if they're conscious, because suffering gives us a moral reason to protect them."
+      );
+
+      const seconds = ((performance.now() - start) / 1000).toFixed(1);
+
+      alert(`AI Score: ${score}/50\nTime: ${seconds} seconds`);
+    } catch (error) {
+      console.error("Local judge failed:", error);
+      alert(`AI error: ${String(error)}`);
+    }
+  }
+  
   const [user, setUser] = useState<AuthUser | null>(null)
   const [route, setRoute] = useState<AuthRoute | 'app'>('landing')
   const [pending, setPending] = useState<AuthUser | null>(null)
@@ -54,13 +95,74 @@ export default function App() {
   const cancelMic = () => { permissionAttempt.current++; requestingMic.current = false; setMicPending(false); setMicError('') }
 
   // Single shared profile: the username always comes from the signed-in account.
-  const enter = (u: AuthUser) => {
-    const saved = loadProfile(u.id)
-    if (saved) { setPlayer({ ...saved.player, name: u.username }); setHistory(saved.history) }
-    else if (u.id === 'demo') { const s = demoSeed(); setPlayer({ ...s.player, name: u.username }); setHistory(s.history) }
-    else { setPlayer({ name: u.username, elo: START_ELO, wins: 0, losses: 0, draws: 0 }); setHistory([]) }
-    setUser(u); setPending(null); setNotice(''); setPage('home'); setRoute('app')
+  
+const enter = async (u: AuthUser) => {
+  try {
+    const profile = await loadSupabaseProfile(u.id)
+
+    setPlayer(profile)
+    setHistory([])
+    setUser(u)
+    setPending(null)
+    setNotice('')
+    setPage('home')
+    setRoute('app')
+  } catch (error) {
+    console.error('Failed to load Supabase profile:', error)
+    setNotice('Could not load your player profile. Please try signing in again.')
+    setRoute('signin')
   }
+}
+
+
+  // Restore Supabase login after refresh or email verification.
+  useEffect(() => {
+    let active = true
+
+    async function restoreUser() {
+      const { data: { user: authUser } } =
+        await supabase.auth.getUser()
+
+      if (!active || !authUser || !authUser.email_confirmed_at) return
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', authUser.id)
+        .single()
+
+      if (!active || error || !profile) return
+
+      enter({
+        id: authUser.id,
+        username: profile.username,
+        email: authUser.email || '',
+        verified: true,
+      })
+    }
+
+    const { data: { subscription } } =
+      supabase.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+          // Defer Supabase requests outside the auth callback.
+          setTimeout(() => { void restoreUser() }, 0)
+        }
+
+        if (event === 'SIGNED_OUT') {
+          setUser(null)
+          setPlayer(null)
+          setHistory([])
+          setStage('idle')
+          setRoute('landing')
+        }
+      })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
   const logout = async () => { cancelMic(); activeMatch.current = null; setStage('idle'); await signOut(); setUser(null); setPlayer(null); setHistory([]); setPage('home'); setRoute('landing') }
   const toAuth = (r: AuthRoute, n = '') => { setNotice(n); setRoute(r) }
   const demo = () => { if (!user) return; const s = demoSeed(); setPlayer({ ...s.player, name: user.username }); setHistory(s.history) }
@@ -132,13 +234,50 @@ export default function App() {
     if (r === 'signin') return <SignIn go={cb.go} notice={notice || (route === 'app' ? 'Sign in to continue.' : '')} onSignedIn={enter} onUnverified={(u) => { setPending(u); toAuth('verify') }} />
     if (r === 'forgot') return <Forgot go={cb.go} onSent={(e) => { setResetEmail(e); toAuth('reset-sent') }} />
     if (r === 'reset-sent') return <ResetSent email={resetEmail} go={cb.go} />
-    if (r === 'verify') return pending ? <VerifyPending email={pending.email} go={cb.go} onVerified={async () => enter(await verifyEmail(pending.email))} onExpired={() => toAuth('verify-invalid')} /> : <SignIn go={cb.go} onSignedIn={enter} onUnverified={(u) => { setPending(u); toAuth('verify') }} />
+    if (r === 'verify')
+  return pending
+    ? <VerifyPending
+        email={pending.email}
+        go={cb.go}
+        onVerified={async () => {}}
+        onExpired={() => toAuth('verify-invalid')}
+      />
+    : <SignIn
+        go={cb.go}
+        onSignedIn={enter}
+        onUnverified={(u) => {
+          setPending(u)
+          toAuth('verify')
+        }}
+      />
     if (r === 'verify-invalid') return <VerifyInvalid go={cb.go} />
     return <Landing go={cb.go} onLeaderboard={() => { setPage('leaderboard'); setRoute('app') }} />
   }
 
   return withMicFeedback(
     <div className="min-h-screen">
+      <button
+        onClick={testJudge}
+        className="fixed bottom-5 right-5 z-50 rounded-lg bg-blue-600 px-4 py-2 text-white"
+      >
+        Test Gemini Judge
+      </button>
+      <button
+        onClick={testLocalJudge}
+        style={{
+          position: "fixed",
+          bottom: 80,
+          right: 20,
+          zIndex: 9999,
+          padding: "12px 20px",
+          background: "#2563eb",
+          color: "white",
+          borderRadius: 8,
+          cursor: "pointer",
+        }}
+      >
+        Test Local Judge
+      </button>
       <Nav page={page} go={go} player={player} email={user.email} onPlay={play} onSignOut={logout} onSignIn={() => {}} onSignUp={() => {}} onLanding={() => {}} />
       <div key={page} className="animate-fade-in">
         {page === 'home' && <Home player={player} history={history} pref={pref} setPref={setPref} onDemo={demo} onPlay={play} go={go} openMatch={setDetail} />}

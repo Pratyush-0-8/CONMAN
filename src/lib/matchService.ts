@@ -1,5 +1,6 @@
 import { type MatchRecord, type Outcome, type PlayerStats, eloDelta, genScores, pickOutcome } from './game'
 import { QUESTIONS, makeOpponent } from './mock'
+import { supabase } from './supabase'
 
 type Profile = { player: PlayerStats; history: MatchRecord[] }
 const PROFILES = 'conman.profiles.v1'
@@ -10,6 +11,23 @@ function readProfiles(): Record<string, Profile> {
 }
 
 export function loadProfile(userId: string) { return readProfiles()[userId] }
+export async function loadSupabaseProfile(userId: string) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('username, elo, wins, losses')
+    .eq('id', userId)
+    .single()
+
+  if (error) throw error
+
+  return {
+    name: data.username,
+    elo: data.elo,
+    wins: data.wins,
+    losses: data.losses,
+    draws: 0,
+  }
+}
 
 export function saveProfile(userId: string, profile: Profile) {
   try { localStorage.setItem(PROFILES, JSON.stringify({ ...readProfiles(), [userId]: profile })) } catch { /* Keep the in-memory demo working when storage is unavailable. */ }

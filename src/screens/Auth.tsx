@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react'
 import { AuthHeading, AuthShell, FormMessage, PasswordField, StatusIcon, TextField } from '../components/auth'
 import { Button, Icon, Logo, Spinner, Wordmark } from '../components/ui'
-import { AuthError, type AuthUser, DEMO_EMAIL, checkUsername, requestPasswordReset, resendVerification, signIn, signUp, validators } from '../lib/auth'
+import { AuthError, type AuthUser, checkUsername, requestPasswordReset, resendVerification, signIn, signUp, validators } from '../lib/auth'
+import { supabase } from '../lib/supabase';
 
 export type AuthRoute = 'landing' | 'signin' | 'signup' | 'forgot' | 'reset-sent' | 'verify' | 'verify-invalid'
 type Go = (r: AuthRoute) => void
@@ -136,7 +137,6 @@ export function SignIn({ go, onSignedIn, onUnverified, notice }: { go: Go; onSig
         <div className="pt-2"><Submit loading={loading}>Sign In</Submit></div>
       </form>
       <Switch text="New to CONMAN?" action="Create account" onClick={() => go('signup')} />
-      <p className="mt-5 rounded-lg bg-card2/60 px-3 py-2 text-center text-[11px] text-mute">Prototype demo account: <button type="button" onClick={() => setEmail(DEMO_EMAIL)} className="text-ink underline-offset-2 hover:underline">{DEMO_EMAIL}</button> with any password.</p>
     </AuthShell>
   )
 }
@@ -178,35 +178,83 @@ export function ResetSent({ email, go }: { email: string; go: Go }) {
 }
 
 /* ---------------- Email verification ---------------- */
-export function VerifyPending({ email, go, onVerified, onExpired }: { email: string; go: Go; onVerified: () => Promise<void>; onExpired: () => void }) {
+
+export function VerifyPending({
+  email,
+  go,
+}: {
+  email: string
+  go: Go
+  onVerified: () => Promise<void>
+  onExpired: () => void
+}) {
   const [sent, setSent] = useState(false)
-  const [busy, setBusy] = useState<'' | 'resend' | 'verify'>('')
-  const [cool, setCool] = useState(0)
-  useEffect(() => { if (cool <= 0) return; const t = setTimeout(() => setCool(cool - 1), 1000); return () => clearTimeout(t) }, [cool])
-  async function resend() { setBusy('resend'); await resendVerification(email); setBusy(''); setSent(true); setCool(30) }
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function resend() {
+    setBusy(true)
+    setError('')
+
+    try {
+      await resendVerification(email)
+      setSent(true)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not resend verification email.'
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <AuthShell onBack={() => go('landing')}>
       <div className="text-center">
         <StatusIcon name="mail" />
-        <h1 className="text-2xl font-semibold tracking-tight">Verify your email</h1>
-        <p className="mt-3 text-sm text-mute">We sent a confirmation link to <b className="font-medium text-ink">{email}</b>. Open it to activate your account and enter the arena.</p>
+
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Verify your email
+        </h1>
+
+        <p className="mt-3 text-sm text-mute">
+          We sent a confirmation link to{' '}
+          <b className="font-medium text-ink">{email}</b>.
+          Click the link to activate your account.
+        </p>
+
         <div className="mt-7 space-y-3">
-          <Button size="lg" className="w-full" onClick={resend} disabled={busy !== '' || cool > 0}>{busy === 'resend' ? <><Spinner />Sending…</> : cool > 0 ? `Resend in ${cool}s` : sent ? 'Resend again' : 'Resend email'}</Button>
-          {sent && <p className="animate-fade-in text-xs text-win">Verification email sent.</p>}
+          {error && <FormMessage>{error}</FormMessage>}
+
+          <Button
+            size="lg"
+            className="w-full"
+            onClick={resend}
+            disabled={busy}
+          >
+            {busy ? 'Sending...' : 'Resend verification email'}
+          </Button>
+
+          {sent && (
+            <p className="text-xs text-win">
+              Verification email sent!
+            </p>
+          )}
         </div>
-        <div className="mt-8 rounded-xl border border-dashed border-line p-4 text-left">
-          <div className="text-[11px] font-medium uppercase tracking-widest text-mute">Prototype only</div>
-          <p className="mt-1 text-xs text-mute">No real email is sent. Simulate clicking the link:</p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <Button size="sm" variant="primary" disabled={busy === 'verify'} onClick={async () => { setBusy('verify'); await onVerified() }}>{busy === 'verify' ? <Spinner size={14} /> : null}Valid link</Button>
-            <Button size="sm" onClick={onExpired}>Expired link</Button>
-          </div>
-        </div>
-        <button onClick={() => go('signin')} className="mt-6 text-sm text-mute hover:text-ink">Back to sign in</button>
+
+        <button
+          onClick={() => go('signin')}
+          className="mt-6 text-sm text-mute hover:text-ink"
+        >
+          Back to sign in
+        </button>
       </div>
     </AuthShell>
   )
 }
+
 export function VerifyInvalid({ go }: { go: Go }) {
   return (
     <AuthShell>

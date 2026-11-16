@@ -1,28 +1,42 @@
-/**
- * MOCK AUTH SERVICE — replace this module with Supabase Auth (email/password) later.
- * Keep the exported function signatures; the UI only talks to this file.
- * Passwords are validated for format and then discarded: they are never stored or compared.
- * The directory holds only public/private profile fields (no credentials), persisted for the demo.
- */
-import { LEADERBOARD } from './mock'
 
-export interface AuthUser { id: string; username: string; email: string; verified: boolean }
-export class AuthError extends Error { constructor(public field: 'username' | 'email' | 'password' | 'form', message: string) { super(message) } }
+import { supabase } from './supabase'
 
-const DIR_KEY = 'conman.directory.v1'
-const DEMO: AuthUser = { id: 'demo', username: 'ember_logic', email: 'demo@conman.app', verified: true }
-export const DEMO_EMAIL = DEMO.email
+export interface AuthUser {
+  id: string
+  username: string
+  email: string
+  verified: boolean
+}
 
-const load = (): AuthUser[] => { try { return JSON.parse(localStorage.getItem(DIR_KEY) || '[]') } catch { return [] } }
-const save = (d: AuthUser[]) => localStorage.setItem(DIR_KEY, JSON.stringify(d))
-const all = () => [DEMO, ...load()]
-const wait = (ms = 900) => new Promise((r) => setTimeout(r, ms))
+export class AuthError extends Error {
+  constructor(
+    public field: 'username' | 'email' | 'password' | 'form',
+    message: string
+  ) {
+    super(message)
+  }
+}
+
+// Kept temporarily so existing imports don't break.
+export const DEMO_EMAIL = ''
 
 export const validators = {
-  username: (v: string) => (v.length < 3 || v.length > 20 ? 'Use 3–20 characters.' : !/^[a-zA-Z0-9_.]+$/.test(v) ? 'Letters, numbers, dots and underscores only.' : ''),
-  email: (v: string) => (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? '' : 'Enter a valid email address.'),
-  password: (v: string) => (v.length < 8 ? 'Use at least 8 characters.' : ''),
+  username: (v: string) =>
+    v.length < 3 || v.length > 20
+      ? 'Use 3–20 characters.'
+      : !/^[a-zA-Z0-9_]+$/.test(v)
+        ? 'Letters, numbers, and underscores only.'
+        : '',
+
+  email: (v: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)
+      ? ''
+      : 'Enter a valid email address.',
+
+  password: (v: string) =>
+    v.length < 8 ? 'Use at least 8 characters.' : '',
 }
+
 export function passwordStrength(p: string) {
   let s = 0
   if (p.length >= 8) s++
@@ -33,36 +47,141 @@ export function passwordStrength(p: string) {
 }
 
 export async function checkUsername(username: string) {
-  await wait(300)
-  const u = username.toLowerCase()
-  return !(LEADERBOARD.some((p) => p.name.toLowerCase() === u) || all().some((a) => a.username.toLowerCase() === u))
+  if (validators.username(username)) return false
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('username', username)
+    .limit(1)
+
+  if (error) throw new AuthError('form', error.message)
+  return data.length === 0
 }
 
-export async function signUp(i: { username: string; email: string; password: string }): Promise<AuthUser> {
-  await wait()
-  if (!(await checkUsername(i.username))) throw new AuthError('username', 'That username is already taken.')
-  if (all().some((a) => a.email === i.email.toLowerCase())) throw new AuthError('email', 'An account with this email already exists.')
-  const user: AuthUser = { id: crypto.randomUUID(), username: i.username, email: i.email.toLowerCase(), verified: false }
-  save([...load(), user])
-  return user
+export async function signUp(i: {
+  username: string
+  email: string
+  password: string
+}): Promise<AuthUser> {
+  const username = i.username.trim()
+  const email = i.email.trim().toLowerCase()
+
+  if (validators.username(username))
+    throw new AuthError('username', validators.username(username))
+
+  if (validators.email(email))
+    throw new AuthError('email', validators.email(email))
+
+  if (validators.password(i.password))
+    throw new AuthError('password', validators.password(i.password))
+
+  if (!(await checkUsername(username)))
+    throw new AuthError('username', 'That username is already taken.')
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password: i.password,
+    options: {
+      data: { username },
+      emailRedirectTo: window.location.origin,
+    },
+  })
+
+  if (error) {
+    if (/username|duplicate|unique|database error/i.test(error.message))
+      throw new AuthError('username', 'Username unavailable or registration failed.')
+
+    throw new AuthError('form', error.message)
+  }
+
+  if (!data.user)
+    throw new AuthError('form', 'Account creation failed.')
+
+  return {
+    id: data.user.id,
+    username,
+    email,
+    verified: !!data.user.email_confirmed_at,
+  }
 }
 
-export async function signIn(email: string, _password: string): Promise<AuthUser> {
-  await wait()
-  const u = all().find((a) => a.email === email.toLowerCase())
-  // Mock: any password is accepted for a known email. Supabase will do the real check.
-  if (!u) throw new AuthError('form', 'Invalid email or password.')
-  return u
+export async function signIn(
+  email: string,
+  password: string
+): Promise<AuthUser> {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password,
+  })
+
+  if (error || !data.user)
+    throw new AuthError('form', error?.message || 'Invalid login.')
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('username')
+    .eq('id', data.user.id)
+    .single()
+
+  if (profileError || !profile)
+    throw new AuthError('form', 'Could not load your player profile.')
+
+  return {
+    id: data.user.id,
+    username: profile.username,
+    email: data.user.email || email,
+    verified: !!data.user.email_confirmed_at,
+  }
 }
 
-export async function verifyEmail(email: string, valid = true): Promise<AuthUser> {
-  await wait(700)
-  if (!valid) throw new AuthError('form', 'This verification link is invalid or has expired.')
-  const d = load(); const u = d.find((a) => a.email === email)
-  if (!u) throw new AuthError('form', 'This verification link is invalid or has expired.')
-  u.verified = true; save(d)
-  return u
+// Real verification happens through the emailed Supabase link.
+// This only checks whether the current user is verified.
+export async function verifyEmail(
+  _email: string,
+  _valid = true
+): Promise<AuthUser> {
+  const { data, error } = await supabase.auth.getUser()
+
+  if (error || !data.user?.email_confirmed_at)
+    throw new AuthError('form', 'Please verify your email using the link.')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('username')
+    .eq('id', data.user.id)
+    .single()
+
+  if (!profile)
+    throw new AuthError('form', 'Player profile not found.')
+
+  return {
+    id: data.user.id,
+    username: profile.username,
+    email: data.user.email || '',
+    verified: true,
+  }
 }
-export async function resendVerification(_email: string) { await wait(700) }
-export async function requestPasswordReset(_email: string) { await wait(900) /* always succeeds: never reveal whether an email exists */ }
-export async function signOut() { await wait(150) }
+
+export async function resendVerification(email: string) {
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: window.location.origin },
+  })
+
+  if (error) throw new AuthError('form', error.message)
+}
+
+export async function requestPasswordReset(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  })
+
+  if (error) throw new AuthError('form', error.message)
+}
+
+export async function signOut() {
+  const { error } = await supabase.auth.signOut()
+  if (error) throw new AuthError('form', error.message)
+}
