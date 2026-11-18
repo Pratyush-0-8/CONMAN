@@ -1,5 +1,6 @@
 {
-  "description": "Challenge other players in fast-paced critical-thinking duels, track your ELO, and sharpen your reasoning through ranked matches and feedback.",
+  "title": "CONMAN | Daily Five",
+  "description": "Five questions. Five chances to think creatively. Challenge your reasoning and see how you compare with other players.",
   "robots": {
     "index": false
   },
