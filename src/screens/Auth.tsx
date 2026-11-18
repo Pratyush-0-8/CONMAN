@@ -15,19 +15,19 @@ const Switch = ({ text, action, onClick }: { text: string; action: string; onCli
 )
 
 /* ---------------- Landing ---------------- */
-export function Landing({ go, onLeaderboard }: { go: Go; onLeaderboard: () => void }) {
+export function Landing({ go, onLeaderboard, showHeader = true }: { go: Go; onLeaderboard: () => void; showHeader?: boolean }) {
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[720px] bg-grid" />
       <div className="pointer-events-none absolute left-1/2 top-1/3 size-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/10 blur-[130px]" />
       <svg className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 opacity-[0.07]" width="900" height="450" viewBox="0 0 32 16" fill="none"><circle cx="12" cy="8" r="7.5" stroke="#fff" strokeWidth=".12" /><circle cx="20" cy="8" r="7.5" stroke="#fff" strokeWidth=".12" /><path d="M16 1.5 21 8l-5 6.5L11 8Z" stroke="#fff" strokeWidth=".12" /></svg>
-      <header className="relative z-10 mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
+      {showHeader && <header className="relative z-10 mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
         <Wordmark />
         <div className="flex items-center gap-1">
           <button onClick={onLeaderboard} className="hidden rounded-lg px-4 py-2 text-sm text-mute hover:text-ink sm:block">Leaderboard</button>
           <Button variant="ghost" size="sm" onClick={() => go('signin')}>Sign In</Button>
         </div>
-      </header>
+      </header>}
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-5 pb-20 pt-10 text-center">
         <div className="animate-pop relative mb-8 grid size-24 place-items-center">
           <span className="absolute inset-0 animate-ping-slow rounded-full border border-accent/40" />

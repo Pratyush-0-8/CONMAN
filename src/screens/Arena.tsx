@@ -8,7 +8,7 @@ import type { Opponent, PlayerStats } from '../lib/game'
 
 const BLUE = '#638BFF', RED = '#F07878'
 
-function AppendInput({ text, onChange, disabled }: { text: string; onChange: (text: string) => void; disabled: boolean }) {
+export function AppendInput({ text, onChange, disabled }: { text: string; onChange: (text: string) => void; disabled: boolean }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const composing = useRef(false)
   const committed = useRef(text)
@@ -33,7 +33,7 @@ function AppendInput({ text, onChange, disabled }: { text: string; onChange: (te
   </Card>
 }
 
-function VoiceInput({ initial, left, onText, onFinish }: { initial: string; left: number; onText: (text: string) => void; onFinish: (text: string) => void }) {
+export function VoiceInput({ initial, left, onText, onFinish }: { initial: string; left: number; onText: (text: string) => void; onFinish: (text: string) => void }) {
   const sp = useSpeech(initial)
   const finishing = useRef(false)
   const alive = useRef(false)

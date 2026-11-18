@@ -1,3 +1,7 @@
 # Auth is validated explicitly with Supabase Auth in the function (supports current signing keys).
 [functions.clever-action]
 verify_jwt = false
+
+# Public Daily Five uses a per-attempt credential, not a Supabase Auth account.
+[functions.daily-five]
+verify_jwt = false
