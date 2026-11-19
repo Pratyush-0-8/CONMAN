@@ -10,7 +10,7 @@ Invitations last 60 seconds. Only verified mutual friends who are available can 
 
 Presence uses one UUID per mounted browser tab, a 10-second heartbeat, and a 35-second server stale cutoff. Hidden/unmounted tabs mark their own sessions unavailable; a second live tab can keep the player available. Active/unacknowledged matches and fresh ranked queues make a player busy regardless of their heartbeat. Presence sessions cannot be read/written directly by browser roles. Stale own sessions are cleaned on later heartbeats.
 
-Invitation Postgres Changes subscriptions are protected by participant RLS, with a five-second polling fallback. Arena's existing two-second polling restores the authoritative match after acceptance, reconnection and refresh. Social lists refresh every ten seconds. Expiration is enforced at every mutation and materialized lazily on invitation reads; it needs no scheduler. Existing abandoned-match behavior is preserved: saved drafts lock at their deadlines when a participant reconnects; judging remains recoverable through the existing worker lease/retry flow.
+Recent declined/cancelled/expired invitations also appear as dismissible status notifications outside Friends. Invitation Postgres Changes subscriptions are protected by participant RLS, with a five-second polling fallback. Arena's existing two-second polling restores the authoritative match after acceptance, reconnection and refresh. Social lists refresh every ten seconds. Expiration is enforced at every mutation and materialized lazily on invitation reads; it needs no scheduler. Existing abandoned-match behavior is preserved: saved drafts lock at their deadlines when a participant reconnects; judging remains recoverable through the existing worker lease/retry flow.
 
 ## Files
 
@@ -49,7 +49,7 @@ Before/after fingerprints confirmed preservation of all pre-existing profile fie
 
 Live checks confirmed RLS on all three social tables, publication registration for invitations/follows alongside existing Arena tables, denied direct client writes and rating/finalizer access, and denied presence-session reads. Public profile/search and anonymous invitation access denials passed through the actual Supabase HTTP API using the existing publishable key. No production users, matches or questions were created for testing.
 
-Frontend Git/Vercel publication status is recorded below after the push.
+The frontend implementation was committed and pushed to `origin/main` through the existing Git/Vercel workflow. Production at **https://conman-pi.vercel.app** was verified to serve the social client and return HTTP 200 with the application shell for `/`, `/friends`, `/arena`, and `/players/<UUID>`. Public routes and deployed JavaScript were checked over HTTP; this does not replace the two-account browser test below.
 
 ## Two-account acceptance test
 

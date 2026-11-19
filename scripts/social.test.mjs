@@ -249,6 +249,7 @@ test("invitation controls accept only pending incoming requests and preserve sen
         sender_name: "Alice",
         recipient_name: "Bob",
         status: "pending",
+        created_at: new Date().toISOString(),
         expires_at: new Date(Date.now() + 60000).toISOString(),
       },
     ],
@@ -273,6 +274,18 @@ test("invitation controls accept only pending incoming requests and preserve sen
   controls[0].onClick();
   await settle();
   assert.deepEqual(calls[1], ["invite", "cancel", "typing"]);
+  const declined = {
+    ...props,
+    compact: true,
+    invitations: props.invitations.map((i) => ({
+      ...i,
+      status: "declined",
+      created_at: new Date().toISOString(),
+    })),
+  };
+  controls = buttons(exports.Invitations(declined));
+  assert.equal(controls[0].children, "Dismiss");
+  controls[0].onClick();
 });
 
 test("username availability escapes underscores while preserving case-insensitive comparison", async () => {
