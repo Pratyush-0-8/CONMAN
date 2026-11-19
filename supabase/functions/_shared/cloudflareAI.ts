@@ -1,4 +1,4 @@
-import { QUESTION_PROMPT } from './questionPrompt.ts'
+import { QUESTION_PROMPT, questionInspiration } from './questionPrompt.ts'
 
 export const DEFAULT_QUESTION_MODEL='@cf/google/gemma-4-26b-a4b-it'
 export class CloudflareError extends Error {
@@ -31,6 +31,7 @@ export async function runQuestionModel({ accountId,apiToken,model=DEFAULT_QUESTI
             role: 'user',
             content: JSON.stringify({
               count,
+              creativeInspiration: questionInspiration(),
               historicalQuestions: bounded,
               correction: feedback.slice(0, 300)
             })

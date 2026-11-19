@@ -57,19 +57,20 @@ begin
  perform public.qgen_commit_batch((claim->>'run_id')::uuid,(claim->>'token')::uuid,request_id,questions);
  if (select count(*) from public.daily_question_queue)<>41 then raise exception 'Repeated batch inserted duplicates'; end if;
  perform public.qgen_finish_job((claim->>'run_id')::uuid,(claim->>'token')::uuid);
- -- Initial Arena fill: add ten at a time, never retire below capacity, then cap at 200.
+ -- Initial Arena fill: add ten at a time, never retire below capacity, then cap at 150.
  select count(*) into before_count from public.ranked_questions;
  if before_count<>6 then raise exception 'Representative schema must start with six original Arena questions'; end if;
- for b in 1..20 loop
+ for b in 1..15 loop
    claim:=public.qgen_claim('arena_rotate',true,true);
    request_id:=public.qgen_request_begin((claim->>'run_id')::uuid,(claim->>'token')::uuid,'test-model',10);
    perform public.qgen_request_end(request_id,200,10,null,null,'arena-fill');
    select jsonb_agg(pg_temp.gen_question(x)) into questions from generate_series(1000+b*10,1009+b*10) x;
    perform public.qgen_commit_batch((claim->>'run_id')::uuid,(claim->>'token')::uuid,request_id,questions);
    perform public.qgen_finish_job((claim->>'run_id')::uuid,(claim->>'token')::uuid);
-   if b<20 and exists(select 1 from public.ranked_question_bank where retired_at is not null) then raise exception 'Premature retirement during initial fill'; end if;
+   if b<15 and exists(select 1 from public.ranked_question_bank where retired_at is not null) then raise exception 'Premature retirement during initial fill'; end if;
+   if (select count(*) from public.ranked_questions)<>least(150,6+b*10) then raise exception 'Wrong incremental fill size'; end if;
  end loop;
- if (select count(*) from public.ranked_questions)<>200 or (select count(*) from public.ranked_question_bank)<>206 then raise exception 'Initial pool fill lost questions or missed target'; end if;
+ if (select count(*) from public.ranked_questions)<>150 or (select count(*) from public.ranked_question_bank)<>156 then raise exception 'Initial pool fill lost questions or missed target'; end if;
  if public.qgen_claim('arena_rotate',true,true)->>'skip'<>'Arena pool full' then raise exception 'Initial fill kept generating'; end if;
  -- An in-progress match's question stays eligible in the active compatibility view.
  insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) values(a,'gen-a@example.test',now(),'{"username":"gen_test_a"}'),(c,'gen-c@example.test',now(),'{"username":"gen_test_c"}');
@@ -82,7 +83,10 @@ begin
  select jsonb_agg(pg_temp.gen_question(x)) into questions from generate_series(2001,2010) x;
  perform public.qgen_commit_batch((claim->>'run_id')::uuid,(claim->>'token')::uuid,request_id,questions);
  perform public.qgen_finish_job((claim->>'run_id')::uuid,(claim->>'token')::uuid);
- if not exists(select 1 from public.ranked_questions where id=protected_id) or (select count(*) from public.ranked_questions)<>200 then raise exception 'Rotation invalidated active match or pool size'; end if;
+ if not exists(select 1 from public.ranked_questions where id=protected_id) or (select count(*) from public.ranked_questions)<>150 then raise exception 'Rotation invalidated active match or pool size'; end if;
+ if exists(select 1 from public.question_generation_jobs where job='arena_rotate' and
+   (mod(extract(epoch from next_due_at)::numeric,21600)<>0 or next_due_at<=clock_timestamp() or next_due_at>clock_timestamp()+interval '6 hours')) then raise exception 'Arena gate is not the next six-hour UTC boundary'; end if;
+ if public.qgen_claim('arena_rotate')->>'skip'<>'not due' then raise exception 'Arena rotation ran before its six-hour gate'; end if;
  if (select count(*) from public.ranked_question_bank where retired_at is not null)<>16 then raise exception 'Rotation did not archive ten oldest eligible questions'; end if;
  -- Invalid batch/duplicate rejection is atomic.
  claim:=public.qgen_claim('arena_rotate',true);
@@ -91,7 +95,7 @@ begin
  select count(*) into prior_catalog from public.question_catalog;
  select jsonb_agg(pg_temp.gen_question(x)) into questions from generate_series(2001,2010) x;
  rejected:=false; begin perform public.qgen_commit_batch((claim->>'run_id')::uuid,(claim->>'token')::uuid,request_id,questions); exception when others then rejected:=true; end;
- if not rejected or (select count(*) from public.question_catalog)<>prior_catalog or (select count(*) from public.ranked_questions)<>200 then raise exception 'Invalid generation partially changed the pool'; end if;
+ if not rejected or (select count(*) from public.question_catalog)<>prior_catalog or (select count(*) from public.ranked_questions)<>150 then raise exception 'Invalid generation partially changed the pool'; end if;
  perform public.qgen_finish_job((claim->>'run_id')::uuid,(claim->>'token')::uuid,'Expected validation failure');
  -- Conservative safety: no eligible old questions means no insertion/retirement at all.
  insert into public.matches(player1_id,player2_id,mode,opponent_type,question,status,ranked_state)
@@ -101,7 +105,7 @@ begin
  perform public.qgen_request_end(request_id,200,10,null,null,'blocked');
  select jsonb_agg(pg_temp.gen_question(x)) into questions from generate_series(3001,3010) x;
  rejected:=false; begin perform public.qgen_commit_batch((claim->>'run_id')::uuid,(claim->>'token')::uuid,request_id,questions); exception when others then rejected:=true; end;
- if not rejected or (select count(*) from public.ranked_question_bank)<>216 then raise exception 'Safety rejection partially rotated questions'; end if;
+ if not rejected or (select count(*) from public.ranked_question_bank)<>166 then raise exception 'Safety rejection partially rotated questions'; end if;
  perform public.qgen_finish_job((claim->>'run_id')::uuid,(claim->>'token')::uuid,'Expected match protection');
  -- Request budgets and provider quota blocks apply across generators.
  claim:=public.qgen_claim('arena_rotate',true);

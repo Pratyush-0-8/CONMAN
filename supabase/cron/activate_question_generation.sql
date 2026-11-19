@@ -7,6 +7,7 @@
 --   set conman.allow_question_cron_setup = 'yes';
 -- All created Cron jobs are immediately INACTIVE. Activate each one separately after testing.
 
+begin;
 do $$ begin
   if current_setting('conman.allow_question_cron_setup',true) is distinct from 'yes' then
     raise exception 'Cron setup has not been explicitly authorized in this SQL session';
@@ -16,6 +17,12 @@ do $$ begin
   end if;
   if not exists(select 1 from vault.decrypted_secrets where name='conman_project_url')
      or not exists(select 1 from vault.decrypted_secrets where name='conman_question_generation_secret') then raise exception 'Configure both Vault secrets first'; end if;
+  if (select decrypted_secret from vault.decrypted_secrets where name='conman_project_url') is distinct from 'https://qoonotocfbwarkjqjxwl.supabase.co' then
+    raise exception 'Cron setup is restricted to the CONMAN project';
+  end if;
+  if (select length(decrypted_secret) from vault.decrypted_secrets where name='conman_question_generation_secret')<32 then
+    raise exception 'Configure the strong Edge invocation secret in Vault';
+  end if;
 end $$;
 
 create or replace function public.qgen_cron_invoke(p_action text) returns bigint language plpgsql security definer set search_path='' as $$
@@ -24,6 +31,9 @@ begin
   if p_action not in ('daily_refill','daily_publish','arena_rotate') then raise exception 'Invalid scheduled job'; end if;
   select decrypted_secret into strict project_url from vault.decrypted_secrets where name='conman_project_url';
   select decrypted_secret into strict invocation_secret from vault.decrypted_secrets where name='conman_question_generation_secret';
+  if project_url<>'https://qoonotocfbwarkjqjxwl.supabase.co' or length(invocation_secret)<32 then
+    raise exception 'Invalid CONMAN Cron configuration';
+  end if;
   select net.http_post(url:=rtrim(project_url,'/')||'/functions/v1/generate-questions',
     headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer '||invocation_secret),
     body:=jsonb_build_object('action',p_action),timeout_milliseconds:=120000) into request_id;
@@ -32,16 +42,16 @@ end $$;
 revoke all on function public.qgen_cron_invoke(text) from public,anon,authenticated;
 
 -- Register inactive jobs atomically. No schedules become active just by pasting this file.
-begin;
 do $$ declare job_id bigint; begin
-  if exists(select 1 from cron.job where jobname in ('conman-daily-refill','conman-daily-publish','conman-arena-rotate')) then
+  if exists(select 1 from cron.job where jobname in ('conman-daily-refill','conman-daily-publish','conman-arena-rotate')
+    or command ilike '%qgen_cron_invoke%' or command ilike '%generate-questions%') then
     raise exception 'Jobs already exist; inspect/alter them instead of creating duplicates';
   end if;
   job_id:=cron.schedule('conman-daily-refill','*/5 * * * *',$job$select public.qgen_cron_invoke('daily_refill');$job$);
   perform cron.alter_job(job_id,active:=false);
   job_id:=cron.schedule('conman-daily-publish','*/5 * * * *',$job$select public.qgen_cron_invoke('daily_publish');$job$);
   perform cron.alter_job(job_id,active:=false);
-  job_id:=cron.schedule('conman-arena-rotate','*/30 * * * *',$job$select public.qgen_cron_invoke('arena_rotate');$job$);
+  job_id:=cron.schedule('conman-arena-rotate','0 */6 * * *',$job$select public.qgen_cron_invoke('arena_rotate');$job$);
   perform cron.alter_job(job_id,active:=false);
 end $$;
 commit;

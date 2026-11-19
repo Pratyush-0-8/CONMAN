@@ -19,6 +19,18 @@ const questions=[
   'Why might a gardener deliberately leave one corner of a perfectly arranged garden completely untidy?',
 ]
 const payload=(count) => ({ questions:questions.slice(0,count) })
+test('batch inspiration samples every palette without repeats and changes with the random source',() => {
+  const first=prompt.questionInspiration(() => 0),second=prompt.questionInspiration(() => 0.999)
+  assert.notDeepEqual(first,second)
+  for (const values of Object.values(first)) {
+    assert.equal(values.length,3)
+    assert.equal(new Set(values).size,3)
+    assert.ok(values.every((value) => typeof value==='string' && value.length>0))
+  }
+  assert.deepEqual(prompt.questionInspiration(() => 0),first, 'sampling must not mutate the palettes')
+  assert.match(prompt.QUESTION_PROMPT,/optional sparks, NOT a checklist/)
+  assert.match(prompt.QUESTION_PROMPT,/several defensible answers/)
+})
 test('whole-batch validation accepts five/ten and rejects malformed/incorrect/duplicate outputs',() => {
   assert.equal(prompt.validateQuestionBatch(JSON.stringify(payload(5)),5).length,5)
   assert.equal(prompt.validateQuestionBatch(payload(10),10).length,10)
@@ -27,16 +39,21 @@ test('whole-batch validation accepts five/ten and rejects malformed/incorrect/du
   assert.equal(prompt.normalizeQuestion('ＷＨＹ — remove CLOCKS?!'),'why remove clocks')
   assert.ok(prompt.questionsNear('A busy museum invites visitors to rearrange its signs; why might this improve their experience?', 'Why might visitors improve their experience when a busy museum invites them to rearrange signs?'))
 })
-test('Cloudflare client sends one configurable-model request and caps historical context',async () => {
+test('Cloudflare client preserves the successful configuration and caps historical context',async (t) => {
   let calls=0
+  const timeout=AbortSignal.timeout,timeouts=[]
+  t.mock.method(AbortSignal,'timeout',(ms) => { timeouts.push(ms); return timeout.call(AbortSignal,ms) })
   const output=await cloudflare.runQuestionModel({ accountId:'test-account',apiToken:'server-only-token',model:'@cf/meta/llama-3.1-8b-instruct',count:5,history:Array(200).fill('a'.repeat(1000)),fetcher:async (url,options) => {
     calls++; assert.ok(url.endsWith('@cf/meta/llama-3.1-8b-instruct')); assert.equal(options.headers.Authorization,'Bearer server-only-token')
     const body=JSON.parse(options.body),user=JSON.parse(body.messages[1].content)
     assert.equal(user.count,5); assert.equal(user.historicalQuestions.length,60); assert.ok(user.historicalQuestions.every((question) => question.length<=220)); assert.ok(options.body.length<20000)
-    assert.equal(body.max_tokens,2048); assert.equal(body.response_format.type,'json_object')
+    assert.equal(body.max_tokens,4096); assert.equal(body.temperature,0.7); assert.equal(body.chat_template_kwargs.enable_thinking,false); assert.equal(body.stream,false); assert.ok(options.signal instanceof AbortSignal);
+    assert.deepEqual(Object.keys(user.creativeInspiration).sort(),['concepts','constraints','objects','professions','settings','subjects']);
+    assert.ok(Object.values(user.creativeInspiration).every((values) => values.length===3 && new Set(values).size===3)); assert.equal(body.response_format.type,'json_object')
     return Response.json({ success:true,result:{ response:payload(5),usage:{ total_tokens:500 } } },{ headers:{ 'cf-ray':'test-ray' } })
   } })
   assert.equal(calls,1); assert.equal(output.requestId,'test-ray'); assert.equal(output.usage.total_tokens,500); assert.equal(prompt.validateQuestionBatch(output.output,5).length,5)
+  assert.deepEqual(timeouts,[70000]); assert.equal(cloudflare.DEFAULT_QUESTION_MODEL,'@cf/google/gemma-4-26b-a4b-it')
 })
 test('Cloudflare quota exhaustion, rate limits, timeout/network, and malformed responses are classified',async () => {
   for (const [status,data,quota,retryable] of [
