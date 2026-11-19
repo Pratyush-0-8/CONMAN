@@ -49,7 +49,7 @@ export async function checkUsername(username: string) {
   const { data, error } = await supabase
     .from('profiles')
     .select('id')
-    .ilike('username', username)
+    .ilike('username', username.replace(/_/g, '\\_'))
     .limit(1)
 
   if (error) throw new AuthError('form', error.message)

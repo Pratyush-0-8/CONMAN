@@ -22,7 +22,7 @@ export function MatchEntry({ m, onClick, showQuestion = true }: { m: MatchRecord
       <Avatar name={m.opponent} size={38} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="text-sm font-medium">vs {m.opponent}</span><span className="text-[11px] capitalize text-mute">{m.myMode} vs {m.oppMode}</span><OutcomePill o={m.outcome} />
+          <span className="text-sm font-medium">vs {m.opponent}</span><span className="text-[11px] capitalize text-mute">{m.myMode} vs {m.oppMode}{m.ranked === false ? ' · Unranked' : ''}</span><OutcomePill o={m.outcome} />
         </div>
         {showQuestion ? <div className="mt-1 truncate font-serif text-[15px] text-mute">{m.question}</div> : <div className="mt-1 text-xs text-mute">{dateTime(m.at)}</div>}
       </div>
@@ -45,7 +45,7 @@ export function MatchDetailDialog({ m, me, onClose }: { m: MatchRecord | null; m
           <div className="mt-5 flex flex-wrap items-center gap-4 rounded-xl border border-line bg-card2/50 p-4 text-sm">
             <span className="font-medium">{me} · {m.myMode}</span>
             <span className="text-mute">vs</span>
-            <span className="font-medium">{m.opponent} · {m.oppMode}</span><RatingBadge elo={m.opponentElo} />
+            <span className="font-medium">{m.opponent} · {m.oppMode}{m.ranked === false ? ' · Unranked' : ''}</span><RatingBadge elo={m.opponentElo} />
             <span className="ml-auto flex items-center gap-2 tabular text-mute">{m.eloBefore} → {m.eloAfter} <Delta d={m.delta} /></span>
           </div>
           <div className="mt-6 flex items-center gap-2"><Eyebrow>Decisive category</Eyebrow><span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-accent">{m.key}</span></div>

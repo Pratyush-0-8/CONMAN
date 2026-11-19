@@ -7,6 +7,7 @@ export type InputMode = 'voice' | 'typing'
 export interface PlayerStats { id?: string; name: string; elo: number; wins: number; losses: number; draws: number }
 export interface Opponent { name: string; elo: number; wins: number; losses: number; mode?: InputMode }
 export interface MatchRecord {
+  ranked?: boolean
   id: string
   myMode: InputMode
   oppMode: InputMode

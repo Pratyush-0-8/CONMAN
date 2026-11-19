@@ -6,7 +6,7 @@ export interface RankedPlayer {
   answer_text?: string; scores: Scores | null; total: number | null; elo_before: number | null; elo_after: number | null; delta: number | null
 }
 export interface RankedMatch {
-  id: string; player1_id: string; player2_id: string; question: string
+  is_ranked?: boolean; id: string; player1_id: string; player2_id: string; question: string
   state: 'active' | 'judge_pending' | 'judging' | 'judge_error' | 'complete'
   round_start: string; completed_at: string | null; players: RankedPlayer[]
   judge_error: string | null; judge_retry_at: string | null; judge_attempts: number
@@ -38,12 +38,12 @@ export async function loadSupabaseProfile(userId: string): Promise<PlayerStats> 
   if (error) throw new Error(error.message)
   return { id: data.id, name: data.username, elo: data.elo, wins: data.wins, losses: data.losses, draws: data.draws }
 }
-export function matchRecord(match: Pick<RankedMatch, 'id' | 'player1_id' | 'question' | 'players' | 'completed_at'> & { result?: RankedMatch['result']; judge_result?: RankedMatch['result'] }, userId: string): MatchRecord {
+export function matchRecord(match: Pick<RankedMatch, 'id' | 'player1_id' | 'question' | 'players' | 'completed_at' | 'is_ranked'> & { result?: RankedMatch['result']; judge_result?: RankedMatch['result'] }, userId: string): MatchRecord {
   const mine = match.players.find((p) => p.player_id === userId)!
   const other = match.players.find((p) => p.player_id !== userId)!
   const result = match.result || match.judge_result!
   const outcome = result.winner === 'draw' ? 'draw' : ((match.player1_id === userId) === (result.winner === 'player1') ? 'win' : 'loss')
-  return { id: match.id, myMode: mine.input_mode, oppMode: other.input_mode, opponent: other.username, opponentElo: other.elo_before!, outcome,
+  return { ranked: match.is_ranked !== false, id: match.id, myMode: mine.input_mode, oppMode: other.input_mode, opponent: other.username, opponentElo: other.elo_before!, outcome,
     delta: mine.delta!, eloBefore: mine.elo_before!, eloAfter: mine.elo_after!, at: Date.parse(match.completed_at!), question: match.question,
     myText: mine.answer_text || '', oppText: other.answer_text || '', mine: mine.scores!, theirs: other.scores!, key: result.decisiveCategory }
 }

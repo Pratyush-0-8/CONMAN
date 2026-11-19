@@ -1,4 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { Social } from './screens/Social'
+import { Invitations } from './components/Social'
+import { useSocial } from './lib/useSocial'
 import { Nav, type Page } from './components/Nav'
 import { Banner, Button, Dialog, Spinner } from './components/ui'
 import { MatchDetailDialog } from './components/lists'
@@ -18,7 +21,7 @@ import { type AuthUser, signOut, verifyEmail } from './lib/auth'
 import { Forgot, Landing, ResetSent, SignIn, SignUp, VerifyInvalid, VerifyPending, type AuthRoute } from './screens/Auth'
 import { supabase } from './lib/supabase'
 
-const PROTECTED: Page[] = ['history', 'profile']
+const PROTECTED: Page[] = ['history', 'profile', 'social']
 
 export default function App() {
   const initialNavigation = useRef(readNavigation(window.location.pathname, window.history.state?.page))
@@ -29,18 +32,20 @@ export default function App() {
   const [resetEmail, setResetEmail] = useState('')
   const [notice, setNotice] = useState('')
   const [page, setPage] = useState<Page>(initialNavigation.current.page)
+  const [profileId, setProfileId] = useState(initialNavigation.current.profileId)
+  const profileRef = useRef(profileId); profileRef.current = profileId
   const pageRef = useRef(page); pageRef.current = page
   const visit = useCallback((next: Navigation, replace = false) => {
-    pageRef.current = next.page; setPage(next.page); setRoute(next.route)
+    pageRef.current = next.page; setPage(next.page); setRoute(next.route); setProfileId(next.profileId); profileRef.current = next.profileId
     const path = navigationPath(next)
     if (window.location.pathname !== path) window.history[replace ? 'replaceState' : 'pushState'](next, '', path)
   }, [])
   useEffect(() => {
-    const pop = () => { const next = readNavigation(window.location.pathname, window.history.state?.page); pageRef.current = next.page; setPage(next.page); setRoute(next.route) }
+    const pop = () => { const next = readNavigation(window.location.pathname, window.history.state?.page); pageRef.current = next.page; setPage(next.page); setRoute(next.route); setProfileId(next.profileId); profileRef.current = next.profileId }
     window.addEventListener('popstate', pop)
     return () => window.removeEventListener('popstate', pop)
   }, [])
-  useEffect(() => { if (user && route !== 'app') visit({ page,route:'app' },true) }, [user, route, page, visit])
+  useEffect(() => { if (user && route !== 'app') visit({ page,route:'app',profileId:profileRef.current },true) }, [user, route, page, visit])
   const [mode, setMode] = useState<InputMode>('voice')
   const [detail, setDetail] = useState<MatchRecord | null>(null)
   const [micPending, setMicPending] = useState(false)
@@ -50,6 +55,9 @@ export default function App() {
   const game = useRankedGame(user?.id)
   const { player, history, state } = game
   const match = state?.match
+  const socialAvailable = !!user && !state?.queue && !match
+  const social = useSocial(user?.id, socialAvailable, game.refresh)
+  const openProfile = (id?: string) => visit({ page:'social', route:'app', profileId:id })
   const mine = match?.players.find((p) => p.player_id === user?.id)
   const other = match?.players.find((p) => p.player_id !== user?.id)
   const [, renderClock] = useState(0)
@@ -61,7 +69,7 @@ export default function App() {
     return () => clearInterval(id)
   }, [clockOffset, match?.id, match?.state])
   useEffect(() => { window.scrollTo({ top: 0 }) }, [page, match?.id, match?.state])
-  const enter = useCallback((u: AuthUser) => { setUser((previous) => previous?.id === u.id ? previous : u); setPending(null); setNotice(''); visit({ page:pageRef.current,route:'app' },true) }, [visit])
+  const enter = useCallback((u: AuthUser) => { setUser((previous) => previous?.id === u.id ? previous : u); setPending(null); setNotice(''); visit({ page:pageRef.current,route:'app',profileId:profileRef.current },true) }, [visit])
   const cancelMic = () => { permissionAttempt.current++; busy.current = false; setMicPending(false); setPlayError('') }
   useEffect(() => {
     let active = true, authVersion = 0
@@ -82,7 +90,7 @@ export default function App() {
     })
     return () => { active = false; permissionAttempt.current++; subscription.unsubscribe() }
   }, [enter, visit])
-  const toAuth = (r: AuthRoute, n = '') => { setNotice(n); visit(r === 'landing' ? { page:'home',route:'app' } : { page:pageRef.current,route:r }) }
+  const toAuth = (r: AuthRoute, n = '') => { setNotice(n); visit(r === 'landing' ? { page:'home',route:'app' } : { page:pageRef.current,route:r,profileId:profileRef.current }) }
   const go = (p: Page) => { cancelMic(); if (!user && PROTECTED.includes(p)) { setNotice('Sign in to continue.'); visit({ page:p,route:'signin' }); return }; visit({ page:p,route:'app' }) }
   const logout = async () => {
     cancelMic()
@@ -109,11 +117,11 @@ export default function App() {
     try { if (match?.state === 'complete') await releaseMatch(match.id); await cancelQueue(); await game.refresh(); visit({ page:'home',route:'app' }) }
     catch (error) { setPlayError(error instanceof Error ? error.message : 'Could not leave matchmaking. Retry.') }
   }
-  const withFeedback = (content: ReactNode) => <>{content}<Dialog open={micPending || !!playError} onClose={cancelMic} title="Find match"><div className="pr-8"><h2 className="mb-4 text-xl font-semibold">{mode === 'voice' ? 'Microphone access' : 'Find match'}</h2>{micPending ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />{mode === 'voice' ? 'Allow microphone access to find a match.' : 'Joining the ranked queue…'}</div> : <Banner tone="error" title="Could not continue" action={<Button size="sm" onClick={play}>Retry</Button>}>{playError}</Banner>}</div></Dialog></>
+  const withFeedback = (content: ReactNode) => <>{content}{user && !match && !state?.queue && (page !== 'social' || profileId) && <aside aria-label="Challenge invitations" className="fixed bottom-24 right-3 z-50 max-h-[65vh] w-[calc(100%-1.5rem)] max-w-sm overflow-auto lg:bottom-6"><Invitations compact invitations={social.invitations} userId={user.id} now={social.now} available={socialAvailable} onUpdate={async () => { await social.refresh(); await game.refresh() }} /></aside>}<Dialog open={micPending || !!playError} onClose={cancelMic} title="Find match"><div className="pr-8"><h2 className="mb-4 text-xl font-semibold">{mode === 'voice' ? 'Microphone access' : 'Find match'}</h2>{micPending ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />{mode === 'voice' ? 'Allow microphone access to find a match.' : 'Joining the ranked queue…'}</div> : <Banner tone="error" title="Could not continue" action={<Button size="sm" onClick={play}>Retry</Button>}>{playError}</Banner>}</div></Dialog></>
   const connection = game.error && <div className="mx-auto max-w-4xl px-4 py-3"><Banner tone="error" title="Connection interrupted" action={<Button size="sm" onClick={() => { void game.reloadAccount(); void game.refresh() }}>Retry</Button>}>{game.error}</Banner></div>
 
   // Public Daily Five is available immediately, independent of auth restoration/profile loading.
-  if (page === 'daily' && route === 'app') return withFeedback(<div className="min-h-screen"><Nav page="daily" go={go} player={player} email={user?.email} onPlay={play} onSignOut={logout} onSignIn={() => toAuth('signin')} onSignUp={() => toAuth('signup')} onLanding={() => go('daily')} /><DailyFive /></div>)
+  if (page === 'daily' && route === 'app' && !match && !state?.queue) return withFeedback(<div className="min-h-screen"><Nav page="daily" go={go} player={player} email={user?.email} onPlay={play} onSignOut={logout} onSignIn={() => toAuth('signin')} onSignUp={() => toAuth('signup')} onLanding={() => go('daily')} /><DailyFive /></div>)
 
   if (player && user && match && mine && other) {
     const opp: Opponent = { name: other.username, elo: other.elo ?? other.elo_before ?? 500, wins: other.wins || 0, losses: other.losses || 0, mode: other.input_mode }
@@ -126,6 +134,7 @@ export default function App() {
 
   if (!user) {
     const shell = (content: ReactNode) => <div className="min-h-screen"><Nav page={page} go={go} player={null} onPlay={play} onSignOut={logout} onSignIn={() => toAuth('signin')} onSignUp={() => toAuth('signup')} onLanding={() => go('daily')} />{content}</div>
+    if (route === 'app' && page === 'social' && profileId) return shell(<Social userId={undefined} profileId={profileId} openProfile={openProfile} social={social} available={false} onMatch={game.refresh} />)
     if (route === 'app' && page === 'leaderboard') return shell(<Leaderboard player={null} />)
     if (!authReady) return shell(<div className="grid min-h-[60vh] place-items-center"><Spinner size={32} /></div>)
     if ((route === 'app' && page === 'home') || route === 'landing') return shell(<Landing showHeader={false} go={toAuth} onLeaderboard={() => go('leaderboard')} />)
@@ -143,6 +152,7 @@ export default function App() {
     <Nav page={page} go={go} player={player} email={user.email} onPlay={play} onSignOut={logout} onSignIn={() => {}} onSignUp={() => {}} onLanding={() => {}} />
     {connection}
     <div key={page} className="animate-fade-in">
+      {page === 'social' && <Social userId={user.id} profileId={profileId} openProfile={openProfile} social={social} available={socialAvailable} onMatch={game.refresh} />}
       {page === 'home' && <Home player={player} history={history} mode={mode} setMode={setMode} onPlay={play} go={go} openMatch={setDetail} />}
       {page === 'leaderboard' && <Leaderboard player={player} />}
       {page === 'history' && <History history={history} player={player} open={setDetail} />}

@@ -3,10 +3,10 @@ import { Icon, Wordmark, Avatar, Button, RatingBadge } from './ui'
 import { pagePath } from '../lib/navigation'
 import type { PlayerStats } from '../lib/game'
 
-export type Page = 'daily' | 'home' | 'leaderboard' | 'history' | 'profile'
+export type Page = 'daily' | 'home' | 'leaderboard' | 'history' | 'profile' | 'social'
 const ITEMS: { id: Page; label: string; icon: string }[] = [
   { id: 'daily', label: 'Daily Five', icon: 'bolt' }, { id: 'home', label: 'Arena', icon: 'mic' }, { id: 'leaderboard', label: 'Leaderboard', icon: 'trophy' },
-  { id: 'history', label: 'History', icon: 'clock' }, { id: 'profile', label: 'Profile', icon: 'user' },
+  { id: 'social', label: 'Friends', icon: 'user' }, { id: 'history', label: 'History', icon: 'clock' }, { id: 'profile', label: 'Profile', icon: 'user' },
 ]
 
 function ProfileMenu({ player, email, go, onSignOut }: { player: PlayerStats; email?: string; go: (p: Page) => void; onSignOut: () => void }) {

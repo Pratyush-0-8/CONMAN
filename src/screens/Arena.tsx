@@ -141,7 +141,7 @@ export function Arena({ player, opp, match, mine, now, onRefresh }: { player: Pl
           : mine.input_mode === 'voice' ? <VoiceInput initial={text} left={left} onText={setText} onFinish={(value) => { latest.current = value; setText(value); void submit(value) }} />
           : <div className="grid w-full gap-5 md:grid-cols-[auto_1fr] md:items-center md:gap-10"><CountdownRing left={left} total={20} label="TYPE" color={RED} size={190} urgent={left < 3000} /><div className="space-y-4"><AppendInput text={text} onChange={setText} disabled={submitting || left === 0} /><LinearTimer left={left} total={20} color={RED} /><Button onClick={() => { void submit(text) }} disabled={submitting}>Submit answer</Button></div></div>}
       </div>
-      <Eyebrow className="text-center !text-mute/50">Ranked · Round 1 of 1 · {mine.input_mode} vs {opp.mode}</Eyebrow>
+      <Eyebrow className="text-center !text-mute/50">{match.is_ranked === false ? 'Unranked friend challenge' : 'Ranked'} · Round 1 of 1 · {mine.input_mode} vs {opp.mode}</Eyebrow>
     </main>
   </div>
 }

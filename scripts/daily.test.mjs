@@ -43,7 +43,7 @@ test('Copy Result writes only the plain numeric score',async () => {
   } finally { if (original) Object.defineProperty(globalThis,'navigator',original); else delete globalThis.navigator }
 })
 
-function appHarness(path = '/') {
+function appHarness(path = '/', gameState = { match:null,queue:null }) {
   let slots=[],cursor=0,pending=[],tree
   const components=new Map()
   const component=(name) => { if (!components.has(name)) components.set(name,Object.defineProperty(() => {},'name',{ value:name })); return components.get(name) }
@@ -63,7 +63,8 @@ function appHarness(path = '/') {
     if (name==='react/jsx-runtime') return { jsx:(type,props) => ({ type,props }),jsxs:(type,props) => ({ type,props }),Fragment:'Fragment' }
     if (name==='./lib/dailyRules') return dailyRules
     if (name==='./lib/navigation') return navigation
-    if (name==='./lib/useRankedGame') return { useRankedGame:(id) => ({ player:id ? { id,name:'tester',elo:500,wins:0,losses:0,draws:0 } : null,history:[],state:{ match:null,queue:null },error:'',refresh:async () => {},reloadAccount:async () => {} }) }
+    if (name==='./lib/useSocial') return { useSocial:() => ({ invitations:[],error:'',now:Date.now(),refresh:async () => {} }) }
+    if (name==='./lib/useRankedGame') return { useRankedGame:(id) => ({ player:id ? { id,name:'tester',elo:500,wins:0,losses:0,draws:0 } : null,history:[],state:gameState,error:'',refresh:async () => {},reloadAccount:async () => {} }) }
     if (name==='./lib/supabase') return { supabase:{ auth:{ getUser:async () => ({ data:{ user:null } }),onAuthStateChange:() => ({ data:{ subscription:{ unsubscribe() {} } } }) } } }
     return new Proxy({},{ get:(_,key) => component(String(key)) })
   }
@@ -108,4 +109,29 @@ test('anonymous URL navigation survives back/forward and refresh without a stale
     try { fresh.render(); await new Promise((resolve) => setImmediate(resolve)); const tree=fresh.render(); assert.ok(find(tree,path==='/' ? 'DailyFive' : path==='/arena' ? 'Landing' : 'Leaderboard')) }
     finally { fresh.close() }
   }
+})
+
+test('public player links survive signed-in auth restoration and social navigation',async () => {
+  const id='20000000-0000-4000-8000-000000000001',app=appHarness('/players/'+id)
+  try {
+    let tree=app.render(); assert.ok(find(tree,'Social')); assert.equal(find(tree,'Social').props.profileId,id)
+    // Use the existing sign-in callback while retaining the profile destination.
+    find(tree,'Nav').props.onSignIn(); tree=app.render()
+    await new Promise(resolve => setImmediate(resolve)); tree=app.render()
+    find(tree,'SignIn').props.onSignedIn({ id:'test-user',username:'tester',verified:true })
+    tree=app.render(); assert.equal(find(tree,'Social').props.profileId,id); assert.equal(app.path(),'/players/'+id)
+    find(tree,'Social').props.openProfile(); tree=app.render(); assert.equal(app.path(),'/friends')
+    app.move(-1); tree=app.render(); assert.equal(find(tree,'Social').props.profileId,id)
+  } finally { app.close() }
+})
+test('a friend match takes over Daily Five and restores the existing Arena view',async () => {
+  const state={ match:null,queue:null },app=appHarness('/',state)
+  try {
+    app.render(); await new Promise(resolve => setImmediate(resolve))
+    let tree=app.render(); find(tree,'Nav').props.go('home'); tree=app.render(); find(tree,'Landing').props.go('signin'); tree=app.render()
+    find(tree,'SignIn').props.onSignedIn({ id:'test-user',username:'tester',verified:true }); tree=app.render()
+    find(tree,'Nav').props.go('daily'); tree=app.render(); assert.ok(find(tree,'DailyFive'))
+    state.match={ id:'test-match',state:'active',round_start:new Date(Date.now()-6000).toISOString(),question:'A question?',players:[{ player_id:'test-user',username:'tester',input_mode:'typing' },{ player_id:'friend',username:'friend',input_mode:'typing' }] }
+    tree=app.render(); assert.ok(find(tree,'Arena')); assert.equal(find(tree,'DailyFive'),undefined)
+  } finally { app.close() }
 })

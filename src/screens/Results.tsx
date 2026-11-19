@@ -48,7 +48,7 @@ export function Results({ m, me, onAgain, onHome }: { m: MatchRecord; me: string
       <div className="pointer-events-none absolute left-1/2 top-0 size-[620px] -translate-x-1/2 -translate-y-1/3 rounded-full blur-[130px] opacity-25" style={{ background: glow }} />
       <div className="relative mx-auto max-w-4xl px-4 pt-14 sm:px-6 sm:pt-20">
         <div className="text-center">
-          <Eyebrow className="animate-fade-in">Ranked 1v1 · Match complete</Eyebrow>
+          <Eyebrow className="animate-fade-in">{m.ranked === false ? 'Friend challenge · Unranked' : 'Ranked 1v1'} · Match complete</Eyebrow>
           <h1 className={`animate-pop mt-3 text-6xl font-semibold tracking-tight sm:text-8xl ${showWinner ? o.c : 'text-ink'}`}>{showWinner ? o.label : 'Score reveal'}</h1>
         </div>
 
@@ -66,7 +66,7 @@ export function Results({ m, me, onAgain, onHome }: { m: MatchRecord; me: string
 
         {showRating && <Card className="animate-fade-up mt-10 grid gap-px overflow-hidden bg-line [animation-delay:300ms] sm:grid-cols-2">
           <div className="bg-card p-6 text-center sm:p-8">
-            <Eyebrow>Your rating</Eyebrow>
+            <Eyebrow>{m.ranked === false ? 'Unranked · Rating unchanged' : 'Your rating'}</Eyebrow>
             <div className="mt-2 flex items-center justify-center gap-4 tabular">
               <span className="text-xl text-mute line-through decoration-mute/40">{m.eloBefore}</span><Icon name="arrow" className="text-mute" />
               <span className={`text-5xl font-semibold ${m.delta > 0 ? 'text-win' : m.delta < 0 ? 'text-lose' : ''}`}>{elo}</span>
@@ -91,7 +91,7 @@ export function Results({ m, me, onAgain, onHome }: { m: MatchRecord; me: string
         </Card>
 
         {showRating && <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <Button variant="primary" size="lg" onClick={onAgain}><Icon name="rotate" />Play again</Button>
+          <Button variant="primary" size="lg" onClick={onAgain}><Icon name="rotate" />{m.ranked === false ? 'Find ranked match' : 'Play again'}</Button>
           <Button size="lg" onClick={onHome}><Icon name="home" />Return home</Button>
         </div>}
       </div>
