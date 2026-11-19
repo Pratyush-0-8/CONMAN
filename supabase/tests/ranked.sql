@@ -14,7 +14,7 @@ declare a uuid:='10000000-0000-4000-8000-000000000001'; b uuid:='10000000-0000-4
  mid uuid; repeated uuid; state jsonb; first_claim jsonb; second_claim jsonb; saved jsonb; again jsonb; before_elo integer;
  scores1 jsonb:='{"Logic":8,"Creativity":8,"Relevance":8,"Clarity":8,"Depth":8}';
  scores2 jsonb:='{"Logic":6,"Creativity":6,"Relevance":6,"Clarity":6,"Depth":6}'; rejected boolean;
- category text; invalid jsonb; side integer;
+ category text; invalid jsonb; side integer; writer_a uuid:=gen_random_uuid(); writer_b uuid:=gen_random_uuid();
 begin
  perform set_config('request.jwt.claim.sub',a::text,true);
  if public.ranked_queue_match('voice',true) is not null then raise exception 'Matched a lone player'; end if;
@@ -31,19 +31,20 @@ begin
  -- Start input without sleeping. Both still derive their time from one saved round_start.
  update public.matches set round_start=clock_timestamp()-interval '6 seconds' where id=mid;
  perform set_config('request.jwt.claim.sub',a::text,true);
- perform public.ranked_answer(mid,'A real voice answer',true);
- perform public.ranked_answer(mid,'duplicate overwrite',true);
+ perform public.ranked_begin_answer(mid,writer_a);
+ perform public.ranked_answer_v2(mid,'A real voice answer',true,1,writer_a);
+ perform public.ranked_answer_v2(mid,'duplicate overwrite',true,2,writer_a);
  state:=public.ranked_state(mid);
  if state->'match'->>'state'<>'active' then raise exception 'Judged before both answers locked'; end if;
  if (select answer_text from public.ranked_drafts where match_id=mid and player_id=a)<>'A real voice answer' then raise exception 'Duplicate submission overwrote answer'; end if;
  perform set_config('request.jwt.claim.sub',b::text,true);
  state:=public.ranked_state(mid);
  if exists(select 1 from jsonb_array_elements(state->'match'->'players') p where p->>'player_id'=a::text and p->>'answer_text' is not null) then raise exception 'Opponent answer leaked'; end if;
- perform public.ranked_answer(mid,'Typed',false);
- rejected:=false;
- begin perform public.ranked_answer(mid,'Edited',false); exception when others then rejected:=true; end;
- if not rejected then raise exception 'Typing mutation accepted'; end if;
- perform public.ranked_answer(mid,'Typed answer',true);
+ perform public.ranked_begin_answer(mid,writer_b);
+ perform public.ranked_answer_v2(mid,'Typed',false,1,writer_b);
+ perform public.ranked_answer_v2(mid,'Edited',false,2,writer_b);
+ if (select answer_text from public.ranked_drafts where match_id=mid and player_id=b)<>'Edited' then raise exception 'Typing edit did not sync'; end if;
+ perform public.ranked_answer_v2(mid,'Edited answer',true,3,writer_b);
  if (public.ranked_state(mid)->'match'->>'state')<>'judge_pending' then raise exception 'Both locked did not trigger judging'; end if;
  rejected:=false;
  begin perform public.ranked_claim(mid,c); exception when others then rejected:=true; end;

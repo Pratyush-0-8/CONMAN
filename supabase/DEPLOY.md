@@ -1,5 +1,7 @@
 # Ranked Phase 1 deployment
 
+For the current editable, versioned multiplayer answer protocol and its forward migration, see [MULTIPLAYER_SYNC.md](MULTIPLAYER_SYNC.md). The initial rollout notes below are historical; do not replay already-applied migrations.
+
 Nothing in this repository has been applied to live Supabase by Codex.
 
 1. Review and run `migrations/202611160001_ranked_multiplayer.sql` once, in that order (there is one migration), using the SQL editor or your existing Supabase migration workflow.
@@ -16,7 +18,7 @@ Nothing in this repository has been applied to live Supabase by Codex.
 
 ## Two-account test
 
-Use two separately signed-in browsers with confirmed accounts. Select Voice on one and Typing on the other, then Find Match (allow the Voice microphone). Both should see the same question, a shared 5-second thinking period, then 15/20 seconds of input. Voice waits when its time ends. Try early submission, refresh, an empty answer, and a temporary network interruption. Typing must reject deletion, replacement, paste, and drop; test your target mobile/IME keyboards too.
+Use two separately signed-in browsers with confirmed accounts. Select Voice on one and Typing on the other, then Find Match (allow the Voice microphone). Both should see the same question, a shared 5-second thinking period, then 15/20 seconds of input. Voice waits when its time ends. Try early submission, refresh, an empty answer, and a temporary network interruption. Typing supports backspace, deletion, and replacement while rejecting paste and drop; test your target mobile/IME keyboards too.
 
 Once both answers lock, verify judging, category scores → totals → winner → ELO, and one completed history entry per user. Refresh both results and retry requests: ratings/statistics must remain unchanged. Repeat with Voice/Voice, Typing/Typing, and queue cancellation. A worker failure or invalid Groq output must leave judging recoverable without awarding ELO; Retry becomes available after the server cooldown.
 
@@ -24,4 +26,4 @@ Input controls close at the server deadlines. Final payload delivery has bounded
 
 ## Local verification
 
-`node --test scripts/ranked.test.mjs scripts/judge.test.mjs`, `npx tsc --noEmit`, and `npm run build` check the pure rules, mocked judge failures/claims, types, and production bundle. `tests/ranked.sql` exercises pairing, privacy, append-only ownership, duplicate claims/finalization, ELO, draws, and expiry; run it only against a disposable database after the migration. Its fixtures roll back. The migration and SQL suite were exercised using temporary embedded PostgreSQL against a representative legacy schema, not the live project. Live Groq/Supabase, Realtime delivery, concurrent multi-connection load, real microphones, and mobile/IME behavior still need the two-account test above.
+`node --test scripts/ranked.test.mjs scripts/judge.test.mjs`, `npx tsc --noEmit`, and `npm run build` check the pure rules, mocked judge failures/claims, types, and production bundle. `tests/ranked.sql` exercises pairing, privacy, versioned answer ownership, duplicate claims/finalization, ELO, draws, and expiry; run it only against a disposable database after the migration. Its fixtures roll back. The migration and SQL suite were exercised using temporary embedded PostgreSQL against a representative legacy schema, not the live project. Live Groq/Supabase, Realtime delivery, concurrent multi-connection load, real microphones, and mobile/IME behavior still need the two-account test above.

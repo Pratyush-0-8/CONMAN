@@ -23,6 +23,7 @@ test("forward-only social migration, RLS and existing Arena/Daily/question SQL r
       "daily_population.sql",
       "question_generation.sql",
       "social.sql",
+      "answer_sync.sql",
     ]) {
       await db.exec(fs.readFileSync(`supabase/tests/${file}`, "utf8"));
       console.log(`PASS ${file}`);

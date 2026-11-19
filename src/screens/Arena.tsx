@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Banner, Button, Card, Eyebrow, Spinner, Wordmark } from '../components/ui'
 import { CountdownRing, LinearTimer, MicIndicator, PlayerCard, PromptCard, RecordingStatus, TranscriptPanel, Waveform } from '../components/game'
 import { useSpeech } from '../lib/speech'
-import { saveAnswer, type RankedMatch, type RankedPlayer } from '../lib/matchService'
+import { type RankedMatch, type RankedPlayer } from '../lib/matchService'
+import { useAnswerSync } from '../lib/useAnswerSync'
 import type { Opponent, PlayerStats } from '../lib/game'
 
 const BLUE = '#638BFF', RED = '#F07878'
@@ -77,50 +78,15 @@ export function Arena({ player, opp, match, mine, now, onRefresh }: { player: Pl
   const start = Date.parse(match.round_start), deadline = Date.parse(mine.deadline)
   const thinking = now < start + 5000
   const left = Math.max(0, deadline - now)
-  const [text, setText] = useState(mine.answer_text || '')
-  const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [done, setDone] = useState(false)
+  const sync = useAnswerSync(match.id, mine, match.round_start, now, onRefresh)
+  const { text, error, submitting, done, finalizing, ready, superseded, change, submit, retry } = sync
   // On refresh after the deadline, do not reopen the microphone.
-  const [voiceWasOpen] = useState(now < deadline)
-  const latest = useRef(text); latest.current = text
-  const chain = useRef<Promise<void>>(Promise.resolve())
-  const inFlight = useRef(false)
-  const alive = useRef(false)
-  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
-  const send = useCallback((value: string, final: boolean) => {
-    const request = chain.current.catch(() => {}).then(() => saveAnswer(match.id, value, final))
-    chain.current = request
-    return request
-  }, [match.id])
-  const submit = useCallback(async (value: string) => {
-    if (inFlight.current || mine.locked_at) return
-    inFlight.current = true; setSubmitting(true); setError('')
-    try { await send(value, true); if (alive.current) setDone(true); await onRefresh() }
-    catch (error) { if (alive.current) setError(error instanceof Error ? error.message : 'Answer could not be sent. Retry.') }
-    finally { inFlight.current = false; if (alive.current) setSubmitting(false) }
-  }, [send, mine.locked_at, onRefresh])
-  // Throttle saves even during uninterrupted typing; do not build up a network backlog.
-  const draftBusy = useRef(false)
-  const lastSaved = useRef(mine.answer_text || '')
+  const voiceStarted = useRef(false)
+  useEffect(() => { if (ready && !thinking && left > 0 && mine.input_mode === 'voice') voiceStarted.current = true }, [ready, thinking, left > 0, mine.input_mode])
   useEffect(() => {
-    if (thinking || mine.locked_at || done || left === 0 || submitting) return
-    const id = setInterval(() => {
-      if (draftBusy.current || latest.current === lastSaved.current) return
-      const value = latest.current
-      draftBusy.current = true
-      void send(value, false).then(() => { lastSaved.current = value }).catch((error) => { if (alive.current) setError(error instanceof Error ? error.message : 'Could not save your draft.') }).finally(() => { draftBusy.current = false })
-    }, 250)
-    return () => clearInterval(id)
-  }, [thinking, mine.locked_at, done, left === 0, submitting, send])
-  const autoSubmitted = useRef(false)
-  useEffect(() => {
-    if (!thinking && left === 0 && mine.input_mode === 'typing' && !autoSubmitted.current && !mine.locked_at) {
-      autoSubmitted.current = true
-      void submit(latest.current)
-    }
-  }, [thinking, left, mine.input_mode, mine.locked_at, submit])
-  const waiting = !!mine.locked_at || done || (left === 0 && (mine.input_mode === 'typing' || !voiceWasOpen))
+    if (!thinking && left === 0 && mine.input_mode === 'typing' && ready && !done) void submit()
+  }, [thinking, left === 0, mine.input_mode, ready, done, submit])
+  const waiting = !!mine.locked_at || done || finalizing || (left === 0 && (mine.input_mode === 'typing' || !voiceStarted.current))
   const phase = thinking ? 'think' : waiting ? 'waiting' : mine.input_mode === 'voice' ? 'speak' : 'type'
   return <div className="relative flex min-h-screen flex-col">
     <div className="pointer-events-none absolute inset-0 bg-grid" />
@@ -134,12 +100,14 @@ export function Arena({ player, opp, match, mine, now, onRefresh }: { player: Pl
     </header>
     <main className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center gap-6 px-4 py-6 sm:gap-10 sm:px-8 sm:py-10">
       <div className="animate-fade-up"><PromptCard question={match.question} compact={!thinking} /></div>
-      {error && <Banner tone="error" title="Answer not synced" action={<Button size="sm" onClick={() => { void submit(latest.current) }}>Retry</Button>}>{error}</Banner>}
+      {error && <Banner tone="error" title="Answer not synced" action={<Button size="sm" onClick={() => { if (superseded) window.location.reload(); else void retry() }}>{superseded ? 'Reload saved answer' : 'Retry'}</Button>}>{error}</Banner>}
       <div className="flex justify-center">
         {thinking ? <div className="flex animate-fade-in flex-col items-center gap-5 text-center"><CountdownRing left={Math.max(0,start+5000-now)} total={5} label="THINK" color={BLUE} size={208} urgent={start+5000-now < 1500} /><p className="text-sm text-mute">You have 5 seconds to prepare your answer.</p></div>
-          : waiting ? <div role="status" className="space-y-4 text-center"><div className="flex justify-center"><Spinner size={28} /></div><h2 className="text-2xl font-semibold">{submitting ? 'Saving your answer…' : 'Waiting for your opponent…'}</h2><p className="text-sm text-mute">Both answers must be locked before judging begins.</p></div>
-          : mine.input_mode === 'voice' ? <VoiceInput initial={text} left={left} onText={setText} onFinish={(value) => { latest.current = value; setText(value); void submit(value) }} />
-          : <div className="grid w-full gap-5 md:grid-cols-[auto_1fr] md:items-center md:gap-10"><CountdownRing left={left} total={20} label="TYPE" color={RED} size={190} urgent={left < 3000} /><div className="space-y-4"><AppendInput text={text} onChange={setText} disabled={submitting || left === 0} /><LinearTimer left={left} total={20} color={RED} /><Button onClick={() => { void submit(text) }} disabled={submitting}>Submit answer</Button></div></div>}
+          : waiting ? <div role="status" className="space-y-4 text-center"><div className="flex justify-center"><Spinner size={28} /></div><h2 className="text-2xl font-semibold">{submitting ? 'Saving your answer…' : finalizing && !done ? 'Your answer is awaiting confirmation…' : 'Waiting for your opponent…'}</h2><p className="text-sm text-mute">Both answers must be locked before judging begins.</p></div>
+          : superseded ? <p className="text-sm text-mute">Answer editing is paused in this tab.</p>
+          : !ready ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />Restoring your saved answer…</div>
+          : mine.input_mode === 'voice' ? <VoiceInput initial={text} left={left} onText={change} onFinish={(value) => { void submit(value) }} />
+          : <div className="grid w-full gap-5 md:grid-cols-[auto_1fr] md:items-center md:gap-10"><CountdownRing left={left} total={20} label="TYPE" color={RED} size={190} urgent={left < 3000} /><div className="space-y-4"><AppendInput text={text} onChange={change} disabled={submitting || finalizing || superseded || left === 0} /><LinearTimer left={left} total={20} color={RED} /><Button onClick={() => { void submit() }} disabled={submitting || finalizing || superseded}>Submit answer</Button></div></div>}
       </div>
       <Eyebrow className="text-center !text-mute/50">{match.is_ranked === false ? 'Unranked friend challenge' : 'Ranked'} · Round 1 of 1 · {mine.input_mode} vs {opp.mode}</Eyebrow>
     </main>

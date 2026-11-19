@@ -7,4 +7,4 @@ export function roundPhase(now: number, roundStart: number, mode: InputMode, loc
   if (now < roundStart + 5000) return 'think'
   return now < inputDeadline(roundStart, mode) ? 'input' : 'waiting'
 }
-export function acceptsAppend(previous: string, next: string) { return next.length <= 12000 && next.startsWith(previous) }
+export function validAnswer(text: string) { return text.length <= 12000 }

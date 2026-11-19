@@ -1,5 +1,7 @@
 # Social MVP
 
+For the later editable-answer synchronization fix and native multiplayer concurrency verification, see [MULTIPLAYER_SYNC.md](MULTIPLAYER_SYNC.md). The launch evidence below records the original social rollout.
+
 Friends lives at `/friends`; public profiles use permanent `/players/<profile UUID>` links. Profiles show username, optional editable display name, ranked ELO/record, social counts and relationship actions. Search is a literal, case-insensitive username prefix (at least two characters), with 30-player pages. Names are case-insensitively unique; the migration aborts on pre-existing ambiguous names instead of renaming players.
 
 Following is directed. A friendship is derived from two follows, never stored separately. Unfollowing immediately breaks friendship and cancels pending invitations on the server. Public RPCs explicitly allowlist profile fields; emails and presence session identifiers are excluded.

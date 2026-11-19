@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { acceptsAppend, inputDeadline, roundPhase } from '../src/lib/rankedRules.ts'
+import { validAnswer, inputDeadline, roundPhase } from '../src/lib/rankedRules.ts'
 import { eloDelta } from '../src/lib/game.ts'
 import { parseJudgment, validateScores } from '../supabase/functions/_shared/judge.ts'
 
@@ -19,12 +19,10 @@ test('cross-mode clocks share thinking and have mode-specific deadlines', () => 
   assert.equal(roundPhase(30000,start,'typing'),'input')
   assert.equal(roundPhase(35000,start,'typing'),'waiting')
 })
-test('typing validation rejects deletion and previous-text replacement, including Unicode', () => {
-  assert.equal(acceptsAppend('hello','hello world'),true)
-  assert.equal(acceptsAppend('你好','你好世界'),true)
-  assert.equal(acceptsAppend('😀','😀!'),true)
-  for (const text of ['hell','Hello','heXllo','world hello']) assert.equal(acceptsAppend('hello',text),false)
-  assert.equal(acceptsAppend('', 'x'.repeat(12001)),false)
+test('editable answers accept backspace, deletion, middle edits, replacement and Unicode within the length limit', () => {
+  for (const text of ['hell', 'Hello', 'heXllo', 'world hello', '', '你好世界', '😀!']) assert.equal(validAnswer(text),true)
+  assert.equal(validAnswer('x'.repeat(12000)),true)
+  assert.equal(validAnswer('x'.repeat(12001)),false)
 })
 test('ELO uses K=32 and one shared formula', () => {
   assert.equal(eloDelta(500,500,'win'),16)

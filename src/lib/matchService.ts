@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 
 export interface RankedPlayer {
   player_id: string; username: string; elo?: number; wins?: number; losses?: number; input_mode: InputMode; deadline: string; locked_at: string | null
-  answer_text?: string; scores: Scores | null; total: number | null; elo_before: number | null; elo_after: number | null; delta: number | null
+  answer_revision?: number; answer_writer?: string | null; answer_text?: string; scores: Scores | null; total: number | null; elo_before: number | null; elo_after: number | null; delta: number | null
 }
 export interface RankedMatch {
   is_ranked?: boolean; id: string; player1_id: string; player2_id: string; question: string
@@ -19,8 +19,9 @@ export interface RankedState {
   clockOffset: number
 }
 
-async function rpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await supabase.rpc(name, args)
+async function rpc<T>(name: string, args: Record<string, unknown> = {}, timeout?: number): Promise<T> {
+  const request = supabase.rpc(name, args)
+  const { data, error } = await (timeout ? request.abortSignal(AbortSignal.timeout(timeout)) : request)
   if (error) throw new Error(error.message)
   return data as T
 }
@@ -59,7 +60,12 @@ export function subscribeRanked(userId: string, refresh: () => void) {
   return () => { void supabase.removeChannel(channel) }
 }
 
-export const saveAnswer = (id: string, text: string, final: boolean) => rpc<void>('ranked_answer', { p_match: id, p_text: text, p_final: final })
+export interface AnswerSnapshot {
+  status: 'ready' | 'saved' | 'locked' | 'stale' | 'superseded' | 'expired'
+  answer_text: string; revision: number; writer_id: string | null; locked_at: string | null; server_now: string
+}
+export const openAnswerSession = (id: string, writer: string, previousWriter: string | null) => rpc<AnswerSnapshot>('ranked_begin_answer', { p_match: id, p_writer: writer, p_previous_writer: previousWriter }, 5000)
+export const saveAnswer = (id: string, text: string, final: boolean, revision: number, writer: string) => rpc<AnswerSnapshot>('ranked_answer_v2', { p_match: id, p_text: text, p_final: final, p_revision: revision, p_writer: writer }, 5000)
 export const queueMatch = (mode: InputMode, join = false) => rpc<string | null>('ranked_queue_match', { p_mode: mode, p_join: join })
 export const cancelQueue = () => rpc<void>('ranked_cancel_queue')
 export const releaseMatch = (id: string) => rpc<void>('ranked_release', { p_match: id })
