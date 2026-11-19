@@ -2,23 +2,37 @@
 
 Backend-only question supply for CONMAN (`qoonotocfbwarkjqjxwl`). The original migration was applied previously; the operator reported successful five/ten-question Cloudflare dry runs. Those calls did not insert inventory.
 
-## Verified deployment status — November 18, 2026 (Eastern)
+## Verified live launch — November 18, 2026, 23:08 Eastern
 
 - Applied only `202611180002_question_rotation.sql` to CONMAN using the authenticated administrative SQL API. Live definitions confirm the 150-question cap, six-hour gate, and shared pairing lock. Earlier migrations were neither edited nor replayed.
-- Deployed only `generate-questions`, now **version 4 / ACTIVE**. Its unauthenticated endpoint returns HTTP 401. Authenticated dry runs of this version and real question-variety review remain pending.
-- Live inventory: **0 unused Daily questions; 6 active Arena questions**. Published November 17, 18, and 19 challenges each contain five questions; they were preserved.
-- All three application jobs remain **disabled**. Vault is installed but empty; `pg_cron` and `pg_net` are not installed. No Cron schedules or nightly automatic publication are active. No Cloudflare requests were made during this deployment, and the recorded request count is zero; authoritative account usage was not inspected.
-- **Immediate blocker:** save the existing Edge `QUESTION_GENERATION_SECRET` in CONMAN Vault as `conman_question_generation_secret` using the dashboard. Edge secrets cannot be read back from the management API. Do not paste the value into chat or SQL source, change it independently, or substitute a client key. Also create Vault `conman_project_url` with `https://qoonotocfbwarkjqjxwl.supabase.co`. Then perform the authenticated dry runs, incremental fills, and checked activation below. The pipeline is deployed but launch is incomplete.
-- The live project has **no `supabase_migrations.schema_migrations` ledger** (earlier changes used SQL-editor deployment). This update followed that same targeted SQL workflow. Do not run a broad `db push`: first reconcile recorded migration history against the actual schema. No earlier versions were speculatively marked applied.
+- Deployed only `generate-questions`, now **version 7 / ACTIVE**. Both generation modes passed authenticated real-model dry runs with the final prompt. Cloudflare model/settings, parser, historical duplicate validation, leases, request budgets, and audit logging remain intact.
+- **Daily FIFO: 35 unused questions. Arena: 150 active questions.** The Arena bank retains all 156 rows, including six retired rows; no question used by an unfinished match was retired. The published November 17, 18, and 19 challenges each retain five questions.
+- Vault contains the existing invocation secret and the public project URL. `pg_cron`, `pg_net`, and Vault are installed. All three application jobs and exactly three Cron jobs are enabled; no competing schedules were registered. Cron timezone is **GMT**. Secret values were not written to source, SQL files, Cron commands, or logs.
 
-These are point-in-time observations; rerun the inventory and monitoring queries before resuming launch.
+| Cron job | Exact schedule | Effective behavior | Status |
+| --- | --- | --- | --- |
+| `conman-daily-refill` | `*/5 * * * *` | Poll/continue a persisted refill cycle every ten elapsed hours; target 35 unused | Active |
+| `conman-daily-publish` | `*/5 * * * *` | Publish the five oldest unused questions at 23:30 America/New_York for tomorrow, with safe recovery checks | Active |
+| `conman-arena-rotate` | `0 */6 * * *` | Ten new questions every six hours, keeping 150 active and archiving eligible excess atomically | Active |
+
+Actual Daily Cron executions at 22:50, 22:55, 23:00, and 23:05 Eastern succeeded and returned HTTP 200 through pg_net/Edge. Refill skipped as not due; publication preserved the already-published challenge. Arena's authenticated scheduled dispatch was also checked through pg_net and returned HTTP 200 with `not due`. Its first timed rotation is scheduled for **November 19 at 01:00 Eastern / 06:00 UTC**; that future execution has not been observed. Initial Arena inserts and the final capacity transition were verified live. The next entirely new Daily assignment is expected for November 20 at 23:30 Eastern on November 19, because November 19 is already published. No future publication is claimed as already executed.
+
+The initial fill accepted **185 generated questions** across 22 successful batches (seven Daily, fifteen Arena). **32 recorded model requests** consumed **568.7636 neurons**; ten candidate batches were rejected by duplicate validation. One Arena run exhausted its three attempts at 86 active questions and inserted nothing. Its full 15-minute cooldown was respected, then filling resumed after sparse inspiration and lexical exclusion context replaced literal question examples. All final job errors, leases and cooldowns are clear. Provider failures/quota errors: **zero**. The request limit remains **80 per UTC day**.
+
+Eight controlled dry runs additionally consumed real allocation; seven reported about **119.9273 neurons** in total, while one rejected duplicate dry run did not return usage. Strict dry runs remain unrecorded in the database request counter. These figures are launch-session observations, not an authoritative account-wide Cloudflare billing total; check the provider dashboard for that total.
+
+The platform owns pg_net's internal queue grants. A request using the public client key and `Accept-Profile: net` returned HTTP 406 (`PGRST106`); only `public` and `graphql_public` are exposed through the Data API. Do not expose the `net` or `vault` schemas. The restricted `qgen_cron_invoke` helper reads Vault at dispatch time and Cron commands contain only the action name.
+
+The live project has **no `supabase_migrations.schema_migrations` ledger** (earlier changes used SQL-editor deployment). This update followed that same targeted SQL workflow. Do not run a broad `db push`: first reconcile recorded migration history against the actual schema. No earlier versions were speculatively marked applied. This does not prevent the activated server-side jobs from operating independently of the operator's computer.
+
+These are point-in-time observations; rerun inventory and monitoring queries before manual filling or operational changes.
 
 ## Architecture and files
 
 - `migrations/202611180001_question_generation.sql`: shared historical duplicate catalog, persistent FIFO, generation jobs/leases, request budgets and audit tables, transactional publication and rotation. Jobs start **disabled**.
 - `migrations/202611180002_question_rotation.sql`: forward-only replacement of the Arena claim/commit functions: 150 active questions and six-hour UTC boundaries. Updates an existing known Cron schedule in place, preserving its active state; creates/enables no jobs and retires no inventory during migration.
 - `functions/generate-questions/index.ts`: one server/operator endpoint with independently claimed actions. A strong invocation secret is required; anon/publishable keys and player JWTs do not authorize it.
-- `functions/_shared/questionPrompt.ts`: editable style prompt, six small local inspiration palettes sampled afresh per model attempt, structured-batch validation, normalized exact and lexical near-duplicate checks. Inspiration is optional; the prompt mixes choices, inventions, predictions, explanations, and persuasion instead of repeating business puzzles.
+- `functions/_shared/questionPrompt.ts`: editable style prompt, six small local inspiration palettes, sampling just one abstract cue and one concrete cue per model attempt, structured-batch validation, normalized exact and lexical near-duplicate checks. Inspiration is optional and deliberately sparse; the prompt mixes choices, inventions, predictions, explanations, and persuasion instead of repeating business puzzles. Full historical question examples are not sent to the model: up to 24 recurring detail words from 60 bounded historical questions guide avoidance without encouraging imitation. Duplicate feedback also omits the rejected question text. Original history remains available to JS validation, and SQL checks the complete catalog.
 - `functions/_shared/cloudflareAI.ts`: reusable Workers AI REST client, bounded context, timeouts, usage/error handling, configurable model. Preserve the verified Gemma payload: thinking disabled, `max_tokens: 4096`, `temperature: 0.7`, and a 70-second fetch timeout.
 - `config.toml`: adds only `generate-questions`; gateway JWT verification is disabled because the handler validates the separate invocation secret.
 - `cron/activate_question_generation.sql`: opt-in setup template. It registers **inactive** schedules only; activation is a separate manual step.
@@ -105,7 +119,7 @@ curl --fail-with-body "$CONMAN_PROJECT_URL/functions/v1/generate-questions" \
   --data '{"action":"arena_fill"}'
 ```
 
-Inspect the count, then repeat deliberately until it reaches 150 (a six-row pool needs 15 successful batches). A full pool returns a skip without calling Cloudflare. `arena_rotate` is the normal scheduled action; an authenticated `"force":true` can run one controlled rotation outside its due window.
+Inspect the count and job lease/cooldown, then repeat deliberately until it reaches 150 (a six-row pool needs 15 successful batches). A full pool returns a skip without calling Cloudflare. `arena_fill` bypasses the normal due window for initial population; after a failed batch, wait until its recorded `retry_after` before another fill invocation. Never force through a validation/provider failure or alter the cooldown to finish faster. `arena_rotate` is the normal scheduled action; an authenticated `"force":true` can run one controlled rotation outside its due window.
 
 ```sql
 select count(*) as active from public.ranked_questions;
@@ -188,7 +202,7 @@ select jobid,status,start_time,end_time,return_message from cron.job_run_details
 select id,status_code,timed_out,error_msg,created from net._http_response order by created desc limit 30;
 ```
 
-Each invocation has a 110-second work budget; it does not start another model attempt without enough time remaining. Leases expire after four minutes. An interrupted worker may have spent a Cloudflare request without committing questions; its reservation still counts. If inventory is low or a rotation fails safety checks, existing questions remain available and unchanged. Operator manual additions and future-day manual seeds are incorporated into the duplicate catalog on the next generation commit. All new batches are checked against the complete historical catalog; only 60 bounded questions are sent as model context. Near-duplicate checks are lexical (normalized content-word overlap), not a promise to detect every semantic paraphrase. Review generated content occasionally; suitability and reasoning quality also depend on the editable prompt and model.
+Each invocation has a 110-second work budget; it does not start another model attempt without enough time remaining. Leases expire after four minutes. An interrupted worker may have spent a Cloudflare request without committing questions; its reservation still counts. If inventory is low or a rotation fails safety checks, existing questions remain available and unchanged. Operator manual additions and future-day manual seeds are incorporated into the duplicate catalog on the next generation commit. All new batches are checked against the complete historical catalog; only up to 24 recurring detail words from 60 bounded historical questions are sent as model context. Near-duplicate checks are lexical (normalized content-word overlap), not a promise to detect every semantic paraphrase. Review generated content occasionally; suitability and reasoning quality also depend on the editable prompt and model.
 
 ## Local verification and remaining live checks
 

@@ -19,12 +19,14 @@ const questions=[
   'Why might a gardener deliberately leave one corner of a perfectly arranged garden completely untidy?',
 ]
 const payload=(count) => ({ questions:questions.slice(0,count) })
-test('batch inspiration samples every palette without repeats and changes with the random source',() => {
+test('batch inspiration stays sparse, mixes abstract/concrete cues, and changes with the random source',() => {
   const first=prompt.questionInspiration(() => 0),second=prompt.questionInspiration(() => 0.999)
   assert.notDeepEqual(first,second)
+  assert.equal(Object.keys(first).length,2)
+  assert.equal(Object.keys(first).filter((key) => ['subjects','constraints','concepts'].includes(key)).length,1)
+  assert.equal(Object.keys(first).filter((key) => ['settings','objects','professions'].includes(key)).length,1)
   for (const values of Object.values(first)) {
-    assert.equal(values.length,3)
-    assert.equal(new Set(values).size,3)
+    assert.equal(values.length,1)
     assert.ok(values.every((value) => typeof value==='string' && value.length>0))
   }
   assert.deepEqual(prompt.questionInspiration(() => 0),first, 'sampling must not mutate the palettes')
@@ -39,17 +41,26 @@ test('whole-batch validation accepts five/ten and rejects malformed/incorrect/du
   assert.equal(prompt.normalizeQuestion('ＷＨＹ — remove CLOCKS?!'),'why remove clocks')
   assert.ok(prompt.questionsNear('A busy museum invites visitors to rearrange its signs; why might this improve their experience?', 'Why might visitors improve their experience when a busy museum invites them to rearrange signs?'))
 })
+test('model history gives bounded recurring details without archived question examples',() => {
+  const archived='A quiet teapot rings beside a velvet curtain; what should the stagehand do next?'
+  const details=prompt.recentQuestionDetails([archived,archived,...Array(58).fill('one person using a single ordinary thing'),...Array(10).fill('zebraplume zebraplume')])
+  assert.ok(details.includes('teapot')); assert.ok(details.includes('curtain'))
+  assert.ok(!details.includes('person')); assert.ok(!details.includes('single')); assert.ok(!details.includes('zebraplume'))
+  assert.ok(details.length<=24); assert.ok(details.every((word) => !word.includes(' ') && word.length<=30))
+  assert.deepEqual(prompt.recentQuestionDetails([archived]),[])
+})
 test('Cloudflare client preserves the successful configuration and caps historical context',async (t) => {
   let calls=0
   const timeout=AbortSignal.timeout,timeouts=[]
   t.mock.method(AbortSignal,'timeout',(ms) => { timeouts.push(ms); return timeout.call(AbortSignal,ms) })
-  const output=await cloudflare.runQuestionModel({ accountId:'test-account',apiToken:'server-only-token',model:'@cf/meta/llama-3.1-8b-instruct',count:5,history:Array(200).fill('a'.repeat(1000)),fetcher:async (url,options) => {
+  const output=await cloudflare.runQuestionModel({ accountId:'test-account',apiToken:'server-only-token',model:'@cf/meta/llama-3.1-8b-instruct',count:5,history:Array(200).fill('a'.repeat(1000)),feedback:'Duplicate question: The velvet puppet rules the shoelace kingdom?',fetcher:async (url,options) => {
     calls++; assert.ok(url.endsWith('@cf/meta/llama-3.1-8b-instruct')); assert.equal(options.headers.Authorization,'Bearer server-only-token')
     const body=JSON.parse(options.body),user=JSON.parse(body.messages[1].content)
-    assert.equal(user.count,5); assert.equal(user.historicalQuestions.length,60); assert.ok(user.historicalQuestions.every((question) => question.length<=220)); assert.ok(options.body.length<20000)
+    assert.equal(user.count,5); assert.equal(user.historicalQuestions,undefined); assert.ok(Array.isArray(user.recentlyUsedDetails)); assert.ok(user.recentlyUsedDetails.length<=24); assert.ok(!options.body.includes('a'.repeat(220))); assert.ok(options.body.length<20000)
+    assert.ok(!options.body.includes('velvet puppet')); assert.ok(user.correction.length<=300)
     assert.equal(body.max_tokens,4096); assert.equal(body.temperature,0.7); assert.equal(body.chat_template_kwargs.enable_thinking,false); assert.equal(body.stream,false); assert.ok(options.signal instanceof AbortSignal);
-    assert.deepEqual(Object.keys(user.creativeInspiration).sort(),['concepts','constraints','objects','professions','settings','subjects']);
-    assert.ok(Object.values(user.creativeInspiration).every((values) => values.length===3 && new Set(values).size===3)); assert.equal(body.response_format.type,'json_object')
+    assert.equal(Object.keys(user.creativeInspiration).length,2);
+    assert.ok(Object.values(user.creativeInspiration).every((values) => values.length===1)); assert.equal(body.response_format.type,'json_object')
     return Response.json({ success:true,result:{ response:payload(5),usage:{ total_tokens:500 } } },{ headers:{ 'cf-ray':'test-ray' } })
   } })
   assert.equal(calls,1); assert.equal(output.requestId,'test-ray'); assert.equal(output.usage.total_tokens,500); assert.equal(prompt.validateQuestionBatch(output.output,5).length,5)

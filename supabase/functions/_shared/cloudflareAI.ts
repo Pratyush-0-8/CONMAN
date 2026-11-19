@@ -1,4 +1,4 @@
-import { QUESTION_PROMPT, questionInspiration } from './questionPrompt.ts'
+import { QUESTION_PROMPT, questionInspiration, recentQuestionDetails } from './questionPrompt.ts'
 
 export const DEFAULT_QUESTION_MODEL='@cf/google/gemma-4-26b-a4b-it'
 export class CloudflareError extends Error {
@@ -19,7 +19,6 @@ export async function runQuestionModel({ accountId,apiToken,model=DEFAULT_QUESTI
   accountId: string; apiToken: string; model?: string; count: 5 | 10; history: string[]; feedback?: string; fetcher?: typeof fetch
 }): Promise<CloudflareOutput> {
   if (!accountId || !apiToken || !/^@(?:cf|hf)\/[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(model)) throw new CloudflareError('Cloudflare credentials/model are not configured correctly',400)
-  const bounded=history.slice(0,60).map((question) => question.slice(0,220))
   let response: Response
   try {
     response=await fetcher(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,{
@@ -32,8 +31,10 @@ export async function runQuestionModel({ accountId,apiToken,model=DEFAULT_QUESTI
             content: JSON.stringify({
               count,
               creativeInspiration: questionInspiration(),
-              historicalQuestions: bounded,
-              correction: feedback.slice(0, 300)
+              recentlyUsedDetails: recentQuestionDetails(history),
+              correction: /duplicate/i.test(feedback)
+                ? 'The prior batch repeated an archived question. Invent completely unrelated premises; avoid rewording earlier ideas.'
+                : feedback.slice(0, 300)
             })
           }
         ],
