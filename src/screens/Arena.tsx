@@ -3,35 +3,45 @@ import { Banner, Button, Card, Eyebrow, Spinner, Wordmark } from '../components/
 import { CountdownRing, LinearTimer, MicIndicator, PlayerCard, PromptCard, RecordingStatus, TranscriptPanel, Waveform } from '../components/game'
 import { useSpeech } from '../lib/speech'
 import { saveAnswer, type RankedMatch, type RankedPlayer } from '../lib/matchService'
-import { acceptsAppend } from '../lib/rankedRules'
 import type { Opponent, PlayerStats } from '../lib/game'
 
 const BLUE = '#638BFF', RED = '#F07878'
 
-export function AppendInput({ text, onChange, disabled }: { text: string; onChange: (text: string) => void; disabled: boolean }) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  const composing = useRef(false)
-  const committed = useRef(text)
-  const [display, setDisplay] = useState(text)
-  const append = (next: string) => {
-    if (acceptsAppend(committed.current, next)) { committed.current = next; onChange(next); setDisplay(next) }
-    else setDisplay(committed.current)
+
+export function AppendInput({ text, onChange, disabled }: {
+    text: string;
+    onChange: (text: string) => void;
+    disabled: boolean;
+  }) {
+    return (
+      <Card className="w-full p-5">
+        <Eyebrow>Your answer</Eyebrow>
+        <textarea
+          aria-label="Type your answer"
+          autoFocus
+          disabled={disabled}
+          value={text}
+          maxLength={12000}
+          rows={5}
+          className="mt-3 w-full resize-none rounded-xl border border-line bg-bg p-4 text-lg leading-relaxed outline-none focus:border-accent disabled:opacity-60"
+          placeholder="Type your reasoning..."
+          onPaste={(e) => e.preventDefault()}
+          onDrop={(e) => e.preventDefault()}
+          onBeforeInput={(e) => {
+            const kind = (e.nativeEvent as InputEvent).inputType;
+            if (kind === 'insertFromPaste' || kind === 'insertFromDrop') {
+              e.preventDefault();
+            }
+          }}
+          onChange={(e) => onChange(e.currentTarget.value)}
+        />
+        <p className="mt-2 text-xs text-mute">
+          You can edit your answer. Pasting is disabled.
+        </p>
+      </Card>
+    );
   }
-  const end = () => { const input = ref.current; if (input && !composing.current) input.setSelectionRange(input.value.length, input.value.length) }
-  return <Card className="w-full p-5">
-    <Eyebrow>Your answer · append only</Eyebrow>
-    <textarea ref={ref} aria-label="Type your answer" autoFocus disabled={disabled} value={display} maxLength={12000} rows={5}
-      className="mt-3 w-full resize-none rounded-xl border border-line bg-bg p-4 text-lg leading-relaxed outline-none focus:border-accent disabled:opacity-60"
-      placeholder="Type your reasoning. Characters cannot be removed or changed."
-      onSelect={end} onFocus={end} onPaste={(e) => e.preventDefault()} onCut={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()} onDragStart={(e) => e.preventDefault()}
-      onBeforeInput={(e) => { const kind = (e.nativeEvent as InputEvent).inputType; if (kind && !['insertText', 'insertLineBreak', 'insertParagraph', 'insertCompositionText', 'insertFromComposition'].includes(kind) && !(composing.current && kind === 'deleteCompositionText')) e.preventDefault() }}
-      onKeyDown={(e) => { if (!composing.current && (['Backspace', 'Delete'].includes(e.key) || ((e.metaKey || e.ctrlKey) && ['v','x','z','y'].includes(e.key.toLowerCase())))) e.preventDefault() }}
-      onCompositionStart={() => { end(); composing.current = true }}
-      onCompositionEnd={(e) => { composing.current = false; append(e.currentTarget.value); end() }}
-      onChange={(e) => { const kind = (e.nativeEvent as InputEvent).inputType || ''; if (/Paste|Drop|Replacement|history/i.test(kind)) { setDisplay(committed.current); return }; if (composing.current) setDisplay(e.currentTarget.value); else append(e.currentTarget.value) }} />
-    <p className="mt-2 text-xs text-mute">No editing, deleting, pasting, or dropping text. Finish early with Submit answer.</p>
-  </Card>
-}
+
 
 export function VoiceInput({ initial, left, onText, onFinish }: { initial: string; left: number; onText: (text: string) => void; onFinish: (text: string) => void }) {
   const sp = useSpeech(initial)

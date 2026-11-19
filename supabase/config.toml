@@ -5,3 +5,7 @@ verify_jwt = false
 # Public Daily Five uses a per-attempt credential, not a Supabase Auth account.
 [functions.daily-five]
 verify_jwt = false
+
+# Server-only generator: its handler requires QUESTION_GENERATION_SECRET, never an anon key.
+[functions.generate-questions]
+verify_jwt = false
