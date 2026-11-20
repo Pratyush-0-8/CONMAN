@@ -45,6 +45,7 @@ test('Copy Result writes only the plain numeric score',async () => {
 
 function appHarness(path = '/', gameState = { match:null,queue:null }) {
   let slots=[],cursor=0,pending=[],tree
+  const matchCalls=[]
   const components=new Map()
   const component=(name) => { if (!components.has(name)) components.set(name,Object.defineProperty(() => {},'name',{ value:name })); return components.get(name) }
   const react={
@@ -61,6 +62,8 @@ function appHarness(path = '/', gameState = { match:null,queue:null }) {
   const localRequire=(name) => {
     if (name==='react') return react
     if (name==='react/jsx-runtime') return { jsx:(type,props) => ({ type,props }),jsxs:(type,props) => ({ type,props }),Fragment:'Fragment' }
+    if (name==='./lib/matchService') return { searchMatch:async (...args) => matchCalls.push(['search',...args]),cancelQueue:async (...args) => { matchCalls.push(['cancel',...args]); gameState.queue=null; if (gameState.search) gameState.search.status='cancelled' },releaseMatch:async () => {} }
+    if (name==='./lib/speech') return { requestMicrophone:async () => matchCalls.push(['microphone']) }
     if (name==='./lib/dailyRules') return dailyRules
     if (name==='./lib/navigation') return navigation
     if (name==='./lib/useAnswerReceipt') return { useAnswerReceipt:()=>null }
@@ -70,8 +73,8 @@ function appHarness(path = '/', gameState = { match:null,queue:null }) {
     return new Proxy({},{ get:(_,key) => component(String(key)) })
   }
   const exports={}
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8'),{ compilerOptions:{ module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX } }).outputText,{ exports,require:localRequire,Date,window:browser,sessionStorage:{ getItem:() => 'arena' },setTimeout,clearTimeout,setInterval,clearInterval })
-  return { path:() => browser.location.pathname,move(delta) { index=Math.max(0,Math.min(entries.length-1,index+delta)); update(entries[index]); listeners.get('popstate')?.() },render() { cursor=0; tree=exports.default(); for (const effect of pending.splice(0)) effect(); return tree },close() { for (const slot of slots) slot?.cleanup?.() } }
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8'),{ compilerOptions:{ module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX } }).outputText,{ exports,require:localRequire,Date,crypto,window:browser,sessionStorage:{ getItem:() => 'arena' },setTimeout,clearTimeout,setInterval,clearInterval })
+  return { matchCalls,path:() => browser.location.pathname,move(delta) { index=Math.max(0,Math.min(entries.length-1,index+delta)); update(entries[index]); listeners.get('popstate')?.() },render() { cursor=0; tree=exports.default(); for (const effect of pending.splice(0)) effect(); return tree },close() { for (const slot of slots) slot?.cleanup?.() } }
 }
 function find(node,name) {
   if (!node || typeof node!=='object') return
@@ -134,5 +137,26 @@ test('a friend match takes over Daily Five and restores the existing Arena view'
     find(tree,'Nav').props.go('daily'); tree=app.render(); assert.ok(find(tree,'DailyFive'))
     state.match={ id:'test-match',state:'active',round_start:new Date(Date.now()-6000).toISOString(),question:'A question?',players:[{ player_id:'test-user',username:'tester',input_mode:'typing' },{ player_id:'friend',username:'friend',input_mode:'typing' }] }
     tree=app.render(); assert.ok(find(tree,'Arena')); assert.equal(find(tree,'DailyFive'),undefined)
+  } finally { app.close() }
+})
+
+test('expired matchmaking restores after refresh, retries with its saved input mode and CAS token, and cancels on browser navigation',async () => {
+  const state={ match:null,queue:null,search:null },app=appHarness('/arena',state)
+  try {
+    app.render(); await new Promise(resolve => setImmediate(resolve))
+    let tree=app.render(); find(tree,'Landing').props.go('signin'); tree=app.render()
+    find(tree,'SignIn').props.onSignedIn({ id:'test-user',username:'tester',verified:true }); tree=app.render()
+    state.search={ attempt_id:'expired-token',status:'expired',input_mode:'typing' }
+    tree=app.render(); const screen=find(tree,'Matchmaking'); assert.equal(screen.props.expired,true)
+    await screen.props.onRetry()
+    assert.equal(app.matchCalls[0][0],'search'); assert.equal(app.matchCalls[0][1],'typing')
+    assert.equal(app.matchCalls[0][3],true); assert.equal(app.matchCalls[0][4],'expired-token')
+    assert.equal(app.matchCalls.some(call => call[0]==='microphone'),false)
+    await screen.props.onCancel(); tree=app.render()
+    assert.ok(find(tree,'Home')); assert.deepEqual(app.matchCalls.at(-1),['cancel','expired-token'])
+    state.queue={ attempt_id:'active-token',input_mode:'typing',joined_at:new Date().toISOString() }
+    tree=app.render(); assert.ok(find(tree,'Matchmaking'))
+    app.move(-1); await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(app.matchCalls.at(-1),['cancel','active-token'])
   } finally { app.close() }
 })

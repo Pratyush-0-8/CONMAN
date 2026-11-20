@@ -99,7 +99,7 @@ begin
  update public.profiles set elo=0 where id=a;
  perform public.ranked_queue_match('voice',true); perform set_config('request.jwt.claim.sub',b::text,true);
  -- Widen this test queue to pair ratings far apart without sleeping.
- update public.ranked_queue set joined_at=clock_timestamp()-interval '1 minute' where player_id=a;
+ update public.ranked_queue set joined_at=clock_timestamp()-interval '19 seconds' where player_id=a;
  mid:=public.ranked_queue_match('voice',true);
  update public.ranked_players set deadline=clock_timestamp()-interval '3 seconds' where match_id=mid;
  perform public.ranked_state(mid); first_claim:=public.ranked_claim(mid,b);

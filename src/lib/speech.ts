@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type MicStatus = 'starting' | 'listening' | 'denied' | 'unsupported' | 'error' | 'stopped'
 
 export async function requestMicrophone() {
+  if (!(window as SpeechWindow).SpeechRecognition && !(window as SpeechWindow).webkitSpeechRecognition) {
+    throw new Error('Voice answers need a browser with Web Speech recognition support. Choose Typing or open CONMAN in a supported browser.')
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Microphone access is unavailable. Open this app over HTTPS in a browser with microphone support, then retry.')
   }

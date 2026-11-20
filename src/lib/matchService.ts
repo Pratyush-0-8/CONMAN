@@ -14,7 +14,8 @@ export interface RankedMatch {
 }
 export interface RankedState {
   match: RankedMatch | null
-  queue: { input_mode: InputMode; joined_at: string } | null
+  queue: { input_mode: InputMode; joined_at: string; attempt_id: string; expires_at: string | null } | null
+  search?: { attempt_id: string; input_mode: InputMode; status: 'searching' | 'expired' | 'cancelled' | 'matched' } | null
   server_now: string
   clockOffset: number
 }
@@ -67,5 +68,6 @@ export interface AnswerSnapshot {
 export const openAnswerSession = (id: string, writer: string, previousWriter: string | null) => rpc<AnswerSnapshot>('ranked_begin_answer', { p_match: id, p_writer: writer, p_previous_writer: previousWriter }, 5000)
 export const saveAnswer = (id: string, text: string, final: boolean, revision: number, writer: string) => rpc<AnswerSnapshot>('ranked_answer_v2', { p_match: id, p_text: text, p_final: final, p_revision: revision, p_writer: writer }, 5000)
 export const queueMatch = (mode: InputMode, join = false) => rpc<string | null>('ranked_queue_match', { p_mode: mode, p_join: join })
-export const cancelQueue = () => rpc<void>('ranked_cancel_queue')
+export const searchMatch = (mode: InputMode, attempt: string, join = false, previous: string | null = null) => rpc<string | null>('ranked_search', { p_mode: mode, p_join: join, p_attempt: attempt, p_previous: previous })
+export const cancelQueue = (attempt?: string) => attempt ? rpc<void>('ranked_cancel_search', { p_attempt: attempt }) : rpc<void>('ranked_cancel_queue')
 export const releaseMatch = (id: string) => rpc<void>('ranked_release', { p_match: id })

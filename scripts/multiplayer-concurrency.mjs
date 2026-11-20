@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { Client } from "pg";
 import { randomUUID } from "node:crypto";
 import { createLegacyFixture } from "./sql-fixture.mjs";
+import { eloDelta } from "../src/lib/game.ts";
 
 const url = new URL(process.env.CONMAN_TEST_DATABASE_URL || "postgres://invalid");
 assert.ok(
@@ -97,6 +98,7 @@ try {
     "answer_sync.sql",
     "daily_reliability.sql",
     "gameplay_timers.sql",
+    "matchmaking_timeout.sql",
   ]) {
     await admin.query(fs.readFileSync("supabase/tests/" + file, "utf8"));
     console.log("PASS native PostgreSQL suite", file);
@@ -229,7 +231,8 @@ try {
       for (const row of after) {
         const old = before.find((p) => p.id === row.id),
           win = row.id === player1_id;
-        assert.equal(row.elo, old.elo + (win ? 16 : -16));
+        const opponent = before.find((p) => p.id !== row.id);
+        assert.equal(row.elo, Math.max(0, old.elo + eloDelta(old.elo, opponent.elo, win ? "win" : "loss")));
         assert.equal(row.wins, old.wins + (win ? 1 : 0));
         assert.equal(row.losses, old.losses + (win ? 0 : 1));
       }
@@ -247,6 +250,50 @@ try {
   const ranked = await B.rpc("ranked_queue_match", ["voice", true]);
   assert.ok(ranked);
   await finish(ranked, true);
+  // Timeout and retry races use separate real connections and the production arbitration lock.
+  let attempt = randomUUID();
+  await overlap([A.name, A2.name], "select pg_advisory_xact_lock(214734601)", [
+    () => A.rpc("ranked_search", ["typing", true, attempt, null]),
+    () => A2.rpc("ranked_search", ["typing", true, attempt, null]),
+  ]);
+  // Prior legacy searches leave a terminal receipt; explicitly CAS from it if necessary.
+  if (!(await A.rpc("ranked_state")).queue) {
+    const prior = (await A.rpc("ranked_state")).search.attempt_id;
+    await A.rpc("ranked_search", ["typing", true, attempt, prior]);
+  }
+  assert.equal((await sql("select count(*)::int count from public.ranked_queue where player_id=$1", [a]))[0].count, 1);
+  await admin.query("update public.ranked_queue set expires_at=clock_timestamp()+interval '500 milliseconds' where player_id=$1", [a]);
+  const bPrevious = (await B.rpc("ranked_state")).search?.attempt_id || null;
+  const bAttempt = randomUUID();
+  const [expired, latePair] = await overlap([A.name, B.name], "select pg_advisory_xact_lock(214734601)", [
+    () => A.rpc("ranked_state"),
+    () => B.rpc("ranked_search", ["typing", true, bAttempt, bPrevious]),
+  ], 650);
+  assert.equal(expired.match, null);
+  assert.equal(expired.search.status, "expired");
+  assert.equal(latePair, null, "a request blocked across expiry cannot match an expired player");
+  assert.equal((await A2.rpc("ranked_state")).search.attempt_id, attempt);
+  await B.rpc("ranked_cancel_search", [bAttempt]);
+  const retryAttempt = randomUUID();
+  await overlap([A.name, A2.name], "select pg_advisory_xact_lock(214734601)", [
+    () => A.rpc("ranked_search", ["typing", true, retryAttempt, attempt]),
+    () => A2.rpc("ranked_cancel_search", [attempt]),
+  ]);
+  assert.equal((await A.rpc("ranked_state")).queue.attempt_id, retryAttempt);
+  await A2.rpc("ranked_search", ["typing", true, attempt, null]);
+  assert.equal((await A.rpc("ranked_state")).queue.attempt_id, retryAttempt);
+  // Pairing commits first; even overlapping cancel/state requests must recover that match.
+  const paired = await B.rpc("ranked_search", ["voice", true, randomUUID(), bAttempt]);
+  assert.ok(paired);
+  await overlap([A.name, A2.name], "select pg_advisory_xact_lock(214734601)", [
+    () => A.rpc("ranked_cancel_search", [retryAttempt]),
+    () => A2.rpc("ranked_state"),
+  ]);
+  assert.equal((await A.rpc("ranked_state")).match.id, paired);
+  assert.equal((await B.rpc("ranked_state")).match.id, paired);
+  await finish(paired, true);
+  console.log("PASS timeout versus human arrival across deadline, duplicate joins, refresh, retry versus stale cancellation, committed match survives cancellation");
+
   // Ranked pairing and accepting a pending friend invite share the same global arbitration lock.
   await A.rpc("social_heartbeat", [randomUUID(), true]);
   await B.rpc("social_heartbeat", [randomUUID(), true]);

@@ -26,6 +26,7 @@ test("forward-only social migration, RLS and existing Arena/Daily/question SQL r
       "answer_sync.sql",
       "daily_reliability.sql",
     "gameplay_timers.sql",
+    "matchmaking_timeout.sql",
     ]) {
       await db.exec(fs.readFileSync(`supabase/tests/${file}`, "utf8"));
       console.log(`PASS ${file}`);

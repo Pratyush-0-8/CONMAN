@@ -15,7 +15,7 @@ import { Judging } from './screens/Judging'
 import { Results } from './screens/Results'
 import { History, Leaderboard, Profile } from './screens/Pages'
 import type { InputMode, MatchRecord, Opponent } from './lib/game'
-import { cancelQueue, matchRecord, queueMatch, releaseMatch } from './lib/matchService'
+import { cancelQueue, matchRecord, searchMatch, releaseMatch } from './lib/matchService'
 import { requestMicrophone } from './lib/speech'
 import { useRankedGame } from './lib/useRankedGame'
 import { type AuthUser, signOut, verifyEmail } from './lib/auth'
@@ -42,7 +42,7 @@ export default function App() {
     if (window.location.pathname !== path) window.history[replace ? 'replaceState' : 'pushState'](next, '', path)
   }, [])
   useEffect(() => {
-    const pop = () => { const next = readNavigation(window.location.pathname, window.history.state?.page); pageRef.current = next.page; setPage(next.page); setRoute(next.route); setProfileId(next.profileId); profileRef.current = next.profileId }
+    const pop = () => { void cancelSearchRef.current(); const next = readNavigation(window.location.pathname, window.history.state?.page); pageRef.current = next.page; setPage(next.page); setRoute(next.route); setProfileId(next.profileId); profileRef.current = next.profileId }
     window.addEventListener('popstate', pop)
     return () => window.removeEventListener('popstate', pop)
   }, [])
@@ -52,10 +52,16 @@ export default function App() {
   const [micPending, setMicPending] = useState(false)
   const [playError, setPlayError] = useState('')
   const permissionAttempt = useRef(0)
+  const cancelSearchRef = useRef<() => Promise<void>>(async () => {})
   const busy = useRef(false)
   const game = useRankedGame(user?.id)
   const { player, history, state } = game
   const match = state?.match
+  cancelSearchRef.current = async () => {
+    permissionAttempt.current++; busy.current = false; setMicPending(false)
+    const attempt = state?.queue?.attempt_id || (state?.search?.status === 'expired' ? state.search.attempt_id : undefined)
+    if (attempt) { try { await cancelQueue(attempt); await game.refresh() } catch { setPlayError('Could not leave matchmaking. Reconnect and retry.') } }
+  }
   const socialAvailable = !!user && !state?.queue && !match
   const social = useSocial(user?.id, socialAvailable, game.refresh)
   const openProfile = (id?: string) => visit({ page:'social', route:'app', profileId:id })
@@ -105,23 +111,28 @@ export default function App() {
     if (busy.current || (match && match.state !== 'complete')) return
     busy.current = true
     const attempt = ++permissionAttempt.current
+    const searchId = crypto.randomUUID()
+    const inputMode = state?.search?.status === 'expired' ? state.search.input_mode : mode
+    setMode(inputMode)
     setPlayError(''); setMicPending(true)
     try {
-      if (mode === 'voice') await requestMicrophone()
+      if (inputMode === 'voice') await requestMicrophone()
       if (attempt !== permissionAttempt.current) return
       if (match?.state === 'complete') await releaseMatch(match.id)
-      await queueMatch(mode, true)
-      if (attempt !== permissionAttempt.current) { await cancelQueue(); return }
+      await searchMatch(inputMode, searchId, true, state?.search?.attempt_id || null)
+      if (attempt !== permissionAttempt.current) { await cancelQueue(searchId); await game.refresh(); return }
       await game.refresh()
     } catch (error) { if (attempt === permissionAttempt.current) setPlayError(error instanceof Error ? error.message : 'Could not join matchmaking. Retry.') }
     finally { if (attempt === permissionAttempt.current) { busy.current = false; setMicPending(false) } }
   }
   const home = async () => {
-    try { if (match?.state === 'complete') await releaseMatch(match.id); await cancelQueue(); await game.refresh(); visit({ page:'home',route:'app' }) }
+    try { if (match?.state === 'complete') await releaseMatch(match.id); await cancelQueue(state?.queue?.attempt_id || state?.search?.attempt_id); await game.refresh(); visit({ page:'home',route:'app' }) }
     catch (error) { setPlayError(error instanceof Error ? error.message : 'Could not leave matchmaking. Retry.') }
   }
   const withFeedback = (content: ReactNode) => <>{content}{finalNotice}{user && !match && !state?.queue && (page !== 'social' || profileId) && <aside aria-label="Challenge invitations" className="fixed bottom-24 right-3 z-50 max-h-[65vh] w-[calc(100%-1.5rem)] max-w-sm overflow-auto lg:bottom-6"><Invitations compact invitations={social.invitations} userId={user.id} now={social.now} available={socialAvailable} onUpdate={async () => { await social.refresh(); await game.refresh() }} /></aside>}<Dialog open={micPending || !!playError} onClose={cancelMic} title="Find match"><div className="pr-8"><h2 className="mb-4 text-xl font-semibold">{mode === 'voice' ? 'Microphone access' : 'Find match'}</h2>{micPending ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />{mode === 'voice' ? 'Allow microphone access to find a match.' : 'Joining the ranked queue…'}</div> : <Banner tone="error" title="Could not continue" action={<Button size="sm" onClick={play}>Retry</Button>}>{playError}</Banner>}</div></Dialog></>
   const connection = game.error && <div className="mx-auto max-w-4xl px-4 py-3"><Banner tone="error" title="Connection interrupted" action={<Button size="sm" onClick={() => { void game.reloadAccount(); void game.refresh() }}>Retry</Button>}>{game.error}</Banner></div>
+
+  if (player && state?.search?.status === 'expired' && !match) return withFeedback(<>{connection}<Matchmaking player={player} opp={null} expired joinedAt={state.queue?.joined_at || ''} clockOffset={clockOffset} onCancel={home} onRetry={play} /></>)
 
   // Public Daily Five is available immediately, independent of auth restoration/profile loading.
   if (page === 'daily' && route === 'app' && !match && !state?.queue) return withFeedback(<div className="min-h-screen"><Nav page="daily" go={go} player={player} email={user?.email} onPlay={play} onSignOut={logout} onSignIn={() => toAuth('signin')} onSignUp={() => toAuth('signup')} onLanding={() => go('daily')} /><DailyFive /></div>)

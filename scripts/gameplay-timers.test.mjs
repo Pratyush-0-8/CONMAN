@@ -32,7 +32,7 @@ test("forward timer migration preserves existing matches and every question of a
     const target = "202611200002_gameplay_timers.sql";
     for (const file of fs
       .readdirSync("supabase/migrations")
-      .filter((f) => f.endsWith(".sql") && f !== target)
+      .filter((f) => f.endsWith(".sql") && f < target)
       .sort())
       await db.exec(fs.readFileSync("supabase/migrations/" + file, "utf8"));
     await db.exec(`insert into auth.users(id,email,email_confirmed_at) values('70000000-0000-4000-8000-000000000001','legacy-a@example.test',now()),('70000000-0000-4000-8000-000000000002','legacy-b@example.test',now());

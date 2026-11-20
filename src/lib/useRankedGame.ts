@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MatchRecord, PlayerStats } from './game'
-import { getRankedState, queueMatch, loadHistory, loadSupabaseProfile, requestJudgment, subscribeRanked, type RankedState } from './matchService'
+import { getRankedState, searchMatch, loadHistory, loadSupabaseProfile, requestJudgment, subscribeRanked, type RankedState } from './matchService'
 
 export function useRankedGame(userId?: string) {
   const [player, setPlayer] = useState<PlayerStats | null>(null)
@@ -30,7 +30,7 @@ export function useRankedGame(userId?: string) {
       polling = true
       try {
         let next = await getRankedState()
-        if (next.queue) { await queueMatch(next.queue.input_mode); next = await getRankedState() }
+        if (next.queue) { await searchMatch(next.queue.input_mode, next.queue.attempt_id); next = await getRankedState() }
         if (!alive) return
         setState(next); setError('')
         if (next.match?.state === 'complete' && next.match.id !== lastCompleted) { lastCompleted = next.match.id; void account() }
@@ -40,11 +40,20 @@ export function useRankedGame(userId?: string) {
     refreshRef.current = update
     void account(); void update()
     const unsubscribe = subscribeRanked(userId, () => { void update() })
-    const poll = setInterval(() => { void update() }, 2000)
+    const poll = setInterval(() => { void update() }, 1000)
     const reconnect = () => { void update() }
     window.addEventListener('online', reconnect); window.addEventListener('focus', reconnect)
     return () => { alive = false; clearInterval(poll); unsubscribe(); window.removeEventListener('online', reconnect); window.removeEventListener('focus', reconnect) }
   }, [userId])
+
+  // Wake at the server's 20-second decision and final expiry, including after refresh.
+  const queue = state?.queue
+  useEffect(() => {
+    if (!queue) return
+    const at = queue.expires_at ? Date.parse(queue.expires_at) : Date.parse(queue.joined_at) + 20000
+    const timer = setTimeout(() => { void refresh() }, Math.max(25, at - Date.now() - (state?.clockOffset || 0)))
+    return () => clearTimeout(timer)
+  }, [queue?.attempt_id, queue?.joined_at, queue?.expires_at, state?.clockOffset, refresh])
 
   const judgingRef = useRef(false)
   const judge = useCallback(async (matchId: string) => {

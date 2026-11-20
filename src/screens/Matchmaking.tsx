@@ -5,18 +5,25 @@ import type { Opponent, PlayerStats } from '../lib/game'
 
 const STATUS = ['Scanning the ranked pool', 'Looking for players near your rating', 'Widening the search range', 'Waiting for another player']
 
-export function Matchmaking({ player, opp, joinedAt, clockOffset, onCancel }: { player: PlayerStats; opp: Opponent | null; joinedAt: string; clockOffset: number; onCancel: () => void }) {
+export function Matchmaking({ player, opp, joinedAt, clockOffset, onCancel, expired = false, onRetry }: { player: PlayerStats; opp: Opponent | null; joinedAt: string; clockOffset: number; onCancel: () => void; expired?: boolean; onRetry?: () => void }) {
   const [now, setNow] = useState(Date.now() + clockOffset)
   useEffect(() => { const id = setInterval(() => setNow(Date.now() + clockOffset), 100); return () => clearInterval(id) }, [clockOffset])
   const t = Math.max(0, (now-Date.parse(joinedAt))/1000)
-  const mm = `${Math.floor(t/60)}:${String(Math.floor(t)%60).padStart(2,'0')}`
+  const mm = `${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t)%60).padStart(2,'0')}`
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-grid" />
       <div className="pointer-events-none absolute left-1/2 top-1/2 size-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/10 blur-[120px]" />
       <header className="relative z-10 flex h-16 items-center px-5 sm:px-8"><Wordmark /></header>
 
-      {!opp ? (
+      {expired ? (
+        <main role="status" className="relative z-10 flex flex-1 animate-fade-in flex-col items-center justify-center px-6 pb-16 text-center">
+          <div className="grid size-24 place-items-center rounded-full border border-line bg-card"><Logo size={44} /></div>
+          <h1 className="mt-8 text-3xl font-semibold tracking-tight sm:text-4xl">No opponents available right now.</h1>
+          <p className="mt-3 max-w-md text-sm text-mute">Looks like nobody's searching for a match. Try again in a bit!</p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3"><Button onClick={onRetry}>Try Again</Button><Button variant="secondary" onClick={onCancel}>Back to Home</Button></div>
+        </main>
+      ) : !opp ? (
         <main key="s" className="relative z-10 flex flex-1 animate-fade-in flex-col items-center justify-center px-6 pb-16 text-center">
           <div className="relative grid size-64 place-items-center sm:size-72">
             {[0, 0.8, 1.6].map((d) => <span key={d} className="absolute inset-8 animate-ping-slow rounded-full border border-accent/40" style={{ animationDelay: `${d}s` }} />)}
