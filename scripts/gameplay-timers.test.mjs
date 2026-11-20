@@ -6,17 +6,17 @@ import { createLegacyFixture } from "./sql-fixture.mjs";
 import { inputDeadline, roundPhase, savedRoundTiming } from "../src/lib/rankedRules.ts";
 
 test("new mode totals and legacy timing metadata remain stable across refresh/reconnect", () => {
-  assert.equal(inputDeadline(0, "typing"), 45000);
-  assert.equal(inputDeadline(0, "voice"), 35000);
+  assert.equal(inputDeadline(0, "typing"), 32000);
+  assert.equal(inputDeadline(0, "voice"), 27000);
   for (const mode of ["typing", "voice"]) {
-    assert.equal(roundPhase(9999, 0, mode), "think");
-    assert.equal(roundPhase(10000, 0, mode), "input");
+    assert.equal(roundPhase(6999, 0, mode), "think");
+    assert.equal(roundPhase(7000, 0, mode), "input");
     const end = inputDeadline(0, mode);
     assert.equal(roundPhase(end - 1, 0, mode), "input");
     assert.equal(roundPhase(end, 0, mode), "waiting");
-    const saved = savedRoundTiming(0, end, 10);
-    assert.equal(saved.inputStart, 10000);
-    assert.equal(saved.answerSeconds, mode === "typing" ? 35 : 25);
+    const saved = savedRoundTiming(0, end, 7);
+    assert.equal(saved.inputStart, 7000);
+    assert.equal(saved.answerSeconds, mode === "typing" ? 25 : 20);
   }
   assert.equal(savedRoundTiming(0, 25000).inputStart, 5000);
   assert.equal(savedRoundTiming(0, 25000).answerSeconds, 20);
@@ -76,7 +76,7 @@ test("forward timer migration preserves existing matches and every question of a
   }
 });
 
-test("actual Daily input renders server-supplied 10/35/25 phases and retains legacy timing", async () => {
+test("actual Daily input renders 7/25/20 and retains both previous timing versions", async () => {
   const vm = await import("node:vm"),
     ts = (await import("typescript")).default,
     rules = await import("../src/lib/rankedRules.ts");
@@ -149,9 +149,39 @@ test("actual Daily input renders server-supplied 10/35/25 phases and retains leg
       attemptId: "test",
       onRefresh: async () => {},
     });
+  assert.equal(find(render("typing", 0, 7, 32000), "CountdownRing").props.total, 7);
+  assert.equal(find(render("typing", 7000, 7, 32000), "CountdownRing").props.total, 25);
+  assert.equal(find(render("voice", 7000, 7, 27000), "VoiceInput").props.totalSeconds, 20);
   assert.equal(find(render("typing", 0, 10, 45000), "CountdownRing").props.total, 10);
   assert.equal(find(render("typing", 10000, 10, 45000), "CountdownRing").props.total, 35);
   assert.equal(find(render("voice", 10000, 10, 35000), "VoiceInput").props.totalSeconds, 25);
   assert.equal(find(render("typing", 5000, 5, 25000), "CountdownRing").props.total, 20);
   assert.equal(find(render("voice", 5000, 5, 20000), "VoiceInput").props.totalSeconds, 15);
+});
+
+
+test("7/25/20 forward migration preserves saved 10/35/25 games and subsequent Daily rounds", async () => {
+  const db = new PGlite(), target = "202611200004_gameplay_timers.sql";
+  try {
+    await createLegacyFixture(db);
+    for (const file of fs.readdirSync("supabase/migrations").filter(f => f.endsWith(".sql") && f < target).sort())
+      await db.exec(fs.readFileSync("supabase/migrations/"+file,"utf8"));
+    await db.exec(`insert into auth.users(id,email,email_confirmed_at) values('83000000-0000-4000-8000-000000000001','timer1@example.test',now()),('83000000-0000-4000-8000-000000000002','timer2@example.test',now());
+      insert into public.profiles(id,username) values('83000000-0000-4000-8000-000000000001','timer1'),('83000000-0000-4000-8000-000000000002','timer2');
+      select set_config('request.jwt.claim.sub','83000000-0000-4000-8000-000000000001',false); select public.ranked_queue_match('typing',true);
+      select set_config('request.jwt.claim.sub','83000000-0000-4000-8000-000000000002',false); select public.ranked_queue_match('voice',true);
+      insert into public.daily_challenges(challenge_date) values((clock_timestamp() at time zone 'America/New_York')::date);
+      insert into public.daily_questions(challenge_date,position,question) select (clock_timestamp() at time zone 'America/New_York')::date,i,'Timer upgrade question '||i from generate_series(1,5) i;
+      update public.daily_challenges set published=true;
+      select public.daily_start(repeat('d',64),'typing','timer-upgrade',(clock_timestamp() at time zone 'America/New_York')::date);`);
+    const snapshot = `select (select jsonb_agg(to_jsonb(m)) from public.matches m) matches,
+      (select jsonb_agg(to_jsonb(p)) from public.ranked_players p) players,
+      (select jsonb_agg(to_jsonb(a)) from public.daily_attempts a) attempts,
+      (select jsonb_agg(to_jsonb(a)) from public.daily_answers a) answers`;
+    const before = (await db.query(snapshot)).rows;
+    await db.exec(fs.readFileSync("supabase/migrations/"+target,"utf8"));
+    assert.deepEqual((await db.query(snapshot)).rows,before);
+    await db.exec(`update public.daily_answers set state='graded',scores='{"Logic":8,"Creativity":8,"Relevance":8,"Clarity":8,"Depth":8}',total=40,locked_at=clock_timestamp(); select public.daily_next(repeat('d',64),1);`);
+    assert.equal((await db.query("select extract(epoch from(deadline-started_at))::int seconds from public.daily_answers where position=2")).rows[0].seconds,45);
+  } finally { await db.close(); }
 });

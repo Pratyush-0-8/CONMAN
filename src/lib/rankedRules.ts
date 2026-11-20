@@ -1,8 +1,8 @@
 import type { InputMode } from "./game";
 
-export const THINKING_SECONDS = 10;
-export const TYPING_SECONDS = 35;
-export const VOICE_SECONDS = 25;
+export const THINKING_SECONDS = 7;
+export const TYPING_SECONDS = 25;
+export const VOICE_SECONDS = 20;
 export function inputDeadline(
   roundStart: number,
   mode: InputMode,

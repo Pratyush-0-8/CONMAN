@@ -24,7 +24,7 @@ begin
  if not rejected then raise exception 'Published fewer than five questions'; end if;
  snapshot:=public.daily_start(h,'typing','test-ip-a',d); id:=(snapshot->>'id')::uuid;
  if snapshot->>'mode'<>'typing' or snapshot->>'position'<>'1' then raise exception 'Anonymous attempt failed'; end if;
- if (select deadline-started_at from public.daily_answers where attempt_id=id and position=1)<>interval '45 seconds' then raise exception 'Typing timing wrong'; end if;
+ if (select deadline-started_at from public.daily_answers where attempt_id=id and position=1)<>interval '32 seconds' then raise exception 'Typing timing wrong'; end if;
  original:=snapshot;
  snapshot:=public.daily_start(h,'voice','test-ip-a',d);
  if snapshot->>'id'<>original->>'id' or snapshot->'rounds'->0->>'started_at'<>original->'rounds'->0->>'started_at' or snapshot->>'mode'<>'typing' then raise exception 'Repeated creation reset attempt'; end if;
@@ -40,7 +40,7 @@ begin
  -- Second attempt has a different credential, separate answers, and Voice timing.
  snapshot:=public.daily_start(other,'voice','test-ip-b',d);
  if snapshot->>'id'=id::text then raise exception 'Cross-attempt identity collision'; end if;
- if (select deadline-started_at from public.daily_answers where attempt_id=(snapshot->>'id')::uuid)<>interval '35 seconds' then raise exception 'Voice timing wrong'; end if;
+ if (select deadline-started_at from public.daily_answers where attempt_id=(snapshot->>'id')::uuid)<>interval '27 seconds' then raise exception 'Voice timing wrong'; end if;
  -- Five sequential real responses, each finalized and graded once.
  for p in 1..5 loop
    update public.daily_answers set started_at=clock_timestamp()-interval '11 seconds',deadline=clock_timestamp()+interval '18 seconds' where attempt_id=id and position=p;
