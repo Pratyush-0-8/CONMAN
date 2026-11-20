@@ -62,7 +62,7 @@ export function subscribeRanked(userId: string, refresh: () => void) {
 
 export interface AnswerSnapshot {
   status: 'ready' | 'saved' | 'locked' | 'stale' | 'superseded' | 'expired'
-  answer_text: string; revision: number; writer_id: string | null; locked_at: string | null; server_now: string
+  final_answer_text?: string | null; final_revision?: number | null; answer_text: string; revision: number; writer_id: string | null; locked_at: string | null; server_now: string
 }
 export const openAnswerSession = (id: string, writer: string, previousWriter: string | null) => rpc<AnswerSnapshot>('ranked_begin_answer', { p_match: id, p_writer: writer, p_previous_writer: previousWriter }, 5000)
 export const saveAnswer = (id: string, text: string, final: boolean, revision: number, writer: string) => rpc<AnswerSnapshot>('ranked_answer_v2', { p_match: id, p_text: text, p_final: final, p_revision: revision, p_writer: writer }, 5000)

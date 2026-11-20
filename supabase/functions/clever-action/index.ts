@@ -32,6 +32,7 @@ Deno.serve(async (request: Request) => {
     if (claim.complete) return respond(claim.result)
     if (claim.busy) return respond({ pending: true }, 202)
     token = claim.token
+    if (claim.answers_confirmed !== true || typeof claim.answers?.[claim.player1_id] !== 'string' || typeof claim.answers?.[claim.player2_id] !== 'string') throw new Error('The saved final answers could not be confirmed. No ratings have been awarded; retry.')
     const apiKey = Deno.env.get('GROQ_API_KEY')
     if (!apiKey) throw new Error('Judge is not configured')
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {

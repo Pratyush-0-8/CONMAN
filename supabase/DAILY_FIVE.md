@@ -1,5 +1,40 @@
 # Daily Five deployment
 
+## Reliability fix (202611200001)
+
+The current Daily Five protocol requires `migrations/202611200001_daily_reliability.sql`, the updated `daily-five` and `clever-action` Edge Functions, and the matching frontend. Apply only this new forward migration to an existing installation; the original rollout notes below are historical.
+
+**Date bug:** `DailyFive.restore` previously consulted IndexedDB's global `active` pointer and resumed any unfinished attempt regardless of its date (`recovered.date===current.date || recovered.status!=='complete'`). `loadCurrentDaily` now asks the server for the current Eastern date, reads only that date's credential, and rejects mismatched state. Old date-keyed credentials and unfinished attempts are preserved. A generation/date guard prevents delayed old requests from replacing a new day's state. `daily_today` supplies the next Eastern midnight; timers plus focus, reconnect and visibility checks reselect the current day, including DST and a midnight crossed during restoration. The canonical route is `/`; there is no historical challenge route to preserve. Explicit token-based historical state lookup remains available to the API owner.
+
+**Answer bug:** Daily Five still used its original append-only `daily_answer`, serialized finals behind autosaves, and sometimes read text from a previous React render. It now uses the existing `useAnswerSync` hook through `dailyAnswerTransport`, with per-editor writer tokens and increasing revisions. Full replacements/backspace/deletion are legal. Finals send immediately, capture the latest input synchronously, and remain fixed across retries. Paste/drop restrictions and server deadlines/grace remain unchanged.
+
+The migration adds `revision`, `writer_id`, `final_answer_text`, and `final_revision` to `daily_answers`. `daily_begin_answer` restores and fences editors; `daily_answer_v2` saves/locks a full snapshot atomically. A trigger freezes the final and rejects subsequent text or revision changes. `daily_claim` verifies that snapshot and returns it, with an explicit confirmation flag, to the judge. `daily_finish` checks consistency again before storing a score. New code never treats an unconfirmed/mismatched final as successful. Legacy locked ungraded rows get a snapshot only if explicitly claimed; already graded history is untouched. Old unversioned writers receive a reload instruction.
+
+Arena/friend games already atomically persisted final text in `match_answers`; their judge previously read `ranked_drafts`. `ranked_claim` now reads the canonical final through `ranked_confirmed_answers`, rejecting missing/duplicate/mismatched finals, and `ranked_finalize` repeats that check. Both Edge handlers reject absent/unconfirmed input before making a model call. The model, rubrics, Elo formulas and unranked exemptions are unchanged.
+
+A small per-answer sessionStorage receipt retains visible draft text or an unresolved final across refresh and screen changes. It has no credentials or server authority, and a newer server revision beats a stale cache. Draft recovery does not submit early; unresolved final recovery retries the same captured text within the existing deadline rules. If a server-locked draft differs from the visible answer, Daily Five shows the saved text and pauses local auto-grading until the player explicitly chooses to continue with that draft. Arena shows a persistent mismatch warning through judging/results. Genuinely submitted empties and timeouts with no answer retain zero-score behavior. Unreceived text cannot be accepted after the server grace period; an outage beyond that boundary is reported rather than silently represented as a successful final.
+
+Changed frontend files: `src/screens/DailyFive.tsx`, `src/lib/dailySession.ts`, `src/lib/dailyService.ts`, the shared `useAnswerSync.ts`, `answerReceipt.ts`, `useAnswerReceipt.ts`, `matchService.ts` types, and `src/App.tsx` for persistent Arena notices. Changed SQL functions: `daily_today`, `daily_state`, `daily_answer`, `daily_claim`, `daily_finish`, `ranked_claim`, `ranked_finalize`; new helpers: `daily_answer_guard`, `daily_answer_snapshot`, `daily_begin_answer`, `daily_answer_v2`, `ranked_confirmed_answers`.
+
+### Regression evidence
+
+Run `npm test`, `npm run typecheck`, and `npm run build`. The updated suite has **70 passing tests** including seven rollback-only SQL suites. `scripts/daily-reliability.test.mjs` covers the November 18/20 scenario, date-keyed refresh, stale responses, Eastern midnight/DST, midnight during a slow restore, actual Daily screen grading gates, persisted local receipts and exact final transport acknowledgement. Edge tests prove that the exact nonempty final reaches the model even after an older empty save, and that missing confirmation never invokes the model. Shared hook tests cover rapid edits, pending/failed autosaves, recovery, voice final text and stale-cache ordering. `tests/daily_reliability.sql` covers canonical final immutability, ownership/isolation, real empties, history preservation and Arena fail-closed consistency checks.
+
+`npm run test:concurrency` uses a new empty dedicated localhost database via `CONMAN_TEST_DATABASE_URL` (see MULTIPLAYER_SYNC.md). The native PostgreSQL run passes all seven SQL suites, existing ranked/friend races and a new overlapping Daily save/final/claim/finish race. The nonempty confirmed final remains unchanged after delayed empty writes, one claim wins, and scoring persists once. Tests use disposable accounts/databases and mocked Groq responses; no production matches or scores are generated for testing.
+
+The production audit identified two **potentially affected** Daily rows with empty stored text and zero scores, both assigned November 18 (positions 1 and 3 in different attempts). Their data cannot establish whether the submissions were genuinely empty. No scores are corrected automatically; detailed identifiers are kept in a separate local audit report rather than committed. No migration backfills or rewrites historical answers, scores, assignments or attempts.
+
+### Manual verification
+
+1. In a browser retaining an unfinished November 18 attempt, open `/` or the Daily Five navigation link on November 20. Expect November 20, with November 18 preserved. On a later date, expect that current Eastern date. The dated scenario is also reproduced by automated fixtures without changing production clocks.
+2. Start today's challenge, type and autosave, then backspace, edit the middle, delete/replace a selection, and submit immediately. Refresh before and after submission; confirm the visible/confirmed final reaches grading and paste/drop remain blocked.
+3. Temporarily slow/disconnect the network. Finals must bypass stalled drafts; a lost response must recover the same final. If a nonempty final misses the server deadline, expect an explicit error and saved-draft review, not a silent empty submission. An intentional empty submit must still score zero.
+4. Test a midnight/tab-return transition and confirm the new date's progress wins over delayed old state. Complete five questions and verify totals/history. Repeat Voice, ranked Arena and unranked friend matches; confirm independent answers and correct Elo behavior.
+
+A browser connection was unavailable to the agent, so real microphone/mobile/IME behavior and live two-account model responses remain manual checks. Production builds pass with existing Vite compatibility/bundle-size warnings.
+
+## Original rollout notes
+
 No SQL, Edge Function, or hosting changes have been applied or deployed automatically.
 
 1. Apply **only** `migrations/202611170001_daily_five.sql` after the existing Arena migration. Do not rerun or edit the already-applied Arena migration. All Daily Five tables/functions are new and independent of Arena.

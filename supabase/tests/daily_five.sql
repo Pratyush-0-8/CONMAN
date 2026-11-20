@@ -9,7 +9,7 @@ set constraints daily_exactly_five immediate;
 do $$
 declare d date:=(clock_timestamp() at time zone 'America/New_York')::date; h text:=repeat('a',64); other text:=repeat('b',64);
  snapshot jsonb; original jsonb; claim jsonb; duplicate jsonb; dist jsonb; id uuid; rejected boolean; category text; p integer;
- scores jsonb:='{"Logic":8,"Creativity":8,"Relevance":8,"Clarity":8,"Depth":8}'; stamp timestamptz;
+ scores jsonb:='{"Logic":8,"Creativity":8,"Relevance":8,"Clarity":8,"Depth":8}'; stamp timestamptz; writer uuid:=gen_random_uuid();
 begin
  if (public.daily_today()->>'date')::date<>d then raise exception 'Wrong Eastern challenge date'; end if;
  rejected:=false;
@@ -35,7 +35,7 @@ begin
  begin perform public.daily_next(h,1); exception when others then rejected:=true; end;
  if not rejected then raise exception 'Skipped an unanswered question'; end if;
  rejected:=false;
- begin perform public.daily_answer(h,1,'Too early',false); exception when others then rejected:=true; end;
+ begin perform public.daily_begin_answer(h,1,writer); perform public.daily_answer_v2(h,1,'Too early',false,1,writer); exception when others then rejected:=true; end;
  if not rejected then raise exception 'Input allowed during thinking'; end if;
  -- Second attempt has a different credential, separate answers, and Voice timing.
  snapshot:=public.daily_start(other,'voice','test-ip-b',d);
@@ -44,12 +44,12 @@ begin
  -- Five sequential real responses, each finalized and graded once.
  for p in 1..5 loop
    update public.daily_answers set started_at=clock_timestamp()-interval '6 seconds',deadline=clock_timestamp()+interval '18 seconds' where attempt_id=id and position=p;
-   perform public.daily_answer(h,p,'Answer',false);
-   rejected:=false;
-   begin perform public.daily_answer(h,p,'Edited',false); exception when others then rejected:=true; end;
-   if not rejected then raise exception 'Append-only rule bypassed'; end if;
-   perform public.daily_answer(h,p,'Answer with reasoning',true);
-   perform public.daily_answer(h,p,'Duplicate changed answer',true);
+   perform public.daily_begin_answer(h,p,writer);
+   perform public.daily_answer_v2(h,p,'Answer',false,1,writer);
+   perform public.daily_answer_v2(h,p,'Edited',false,2,writer);
+   if (select answer_text from public.daily_answers where attempt_id=id and position=p)<>'Edited' then raise exception 'Editable draft not saved'; end if;
+   perform public.daily_answer_v2(h,p,'Answer with reasoning',true,3,writer);
+   perform public.daily_answer_v2(h,p,'Duplicate changed answer',true,4,writer);
    if (select answer_text from public.daily_answers where attempt_id=id and position=p)<>'Answer with reasoning' then raise exception 'Finalized answer changed'; end if;
    if (public.daily_state(other)->'rounds'->0->>'answer_text')<>'' then raise exception 'Cross-attempt answer leak'; end if;
    claim:=public.daily_claim(h,p,'test-ip-a'); duplicate:=public.daily_claim(h,p,'test-ip-a');

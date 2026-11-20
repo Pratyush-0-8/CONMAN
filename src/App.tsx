@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { useAnswerReceipt } from './lib/useAnswerReceipt'
 import { Social } from './screens/Social'
 import { Invitations } from './components/Social'
 import { useSocial } from './lib/useSocial'
@@ -59,6 +60,8 @@ export default function App() {
   const social = useSocial(user?.id, socialAvailable, game.refresh)
   const openProfile = (id?: string) => visit({ page:'social', route:'app', profileId:id })
   const mine = match?.players.find((p) => p.player_id === user?.id)
+  const receipt = useAnswerReceipt(`${match?.id}:${user?.id}`,mine?.answer_text,!!mine?.locked_at)
+  const finalNotice = receipt && !receipt.confirmed && receipt.error && <div className="mx-auto max-w-4xl px-4 py-3"><Banner tone="error" title="Final answer not confirmed">{receipt.error}</Banner></div>
   const other = match?.players.find((p) => p.player_id !== user?.id)
   const [, renderClock] = useState(0)
   const clockOffset = state?.clockOffset || 0
@@ -117,7 +120,7 @@ export default function App() {
     try { if (match?.state === 'complete') await releaseMatch(match.id); await cancelQueue(); await game.refresh(); visit({ page:'home',route:'app' }) }
     catch (error) { setPlayError(error instanceof Error ? error.message : 'Could not leave matchmaking. Retry.') }
   }
-  const withFeedback = (content: ReactNode) => <>{content}{user && !match && !state?.queue && (page !== 'social' || profileId) && <aside aria-label="Challenge invitations" className="fixed bottom-24 right-3 z-50 max-h-[65vh] w-[calc(100%-1.5rem)] max-w-sm overflow-auto lg:bottom-6"><Invitations compact invitations={social.invitations} userId={user.id} now={social.now} available={socialAvailable} onUpdate={async () => { await social.refresh(); await game.refresh() }} /></aside>}<Dialog open={micPending || !!playError} onClose={cancelMic} title="Find match"><div className="pr-8"><h2 className="mb-4 text-xl font-semibold">{mode === 'voice' ? 'Microphone access' : 'Find match'}</h2>{micPending ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />{mode === 'voice' ? 'Allow microphone access to find a match.' : 'Joining the ranked queue…'}</div> : <Banner tone="error" title="Could not continue" action={<Button size="sm" onClick={play}>Retry</Button>}>{playError}</Banner>}</div></Dialog></>
+  const withFeedback = (content: ReactNode) => <>{content}{finalNotice}{user && !match && !state?.queue && (page !== 'social' || profileId) && <aside aria-label="Challenge invitations" className="fixed bottom-24 right-3 z-50 max-h-[65vh] w-[calc(100%-1.5rem)] max-w-sm overflow-auto lg:bottom-6"><Invitations compact invitations={social.invitations} userId={user.id} now={social.now} available={socialAvailable} onUpdate={async () => { await social.refresh(); await game.refresh() }} /></aside>}<Dialog open={micPending || !!playError} onClose={cancelMic} title="Find match"><div className="pr-8"><h2 className="mb-4 text-xl font-semibold">{mode === 'voice' ? 'Microphone access' : 'Find match'}</h2>{micPending ? <div role="status" className="flex items-center gap-3 text-sm text-mute"><Spinner />{mode === 'voice' ? 'Allow microphone access to find a match.' : 'Joining the ranked queue…'}</div> : <Banner tone="error" title="Could not continue" action={<Button size="sm" onClick={play}>Retry</Button>}>{playError}</Banner>}</div></Dialog></>
   const connection = game.error && <div className="mx-auto max-w-4xl px-4 py-3"><Banner tone="error" title="Connection interrupted" action={<Button size="sm" onClick={() => { void game.reloadAccount(); void game.refresh() }}>Retry</Button>}>{game.error}</Banner></div>
 
   // Public Daily Five is available immediately, independent of auth restoration/profile loading.
@@ -126,7 +129,7 @@ export default function App() {
   if (player && user && match && mine && other) {
     const opp: Opponent = { name: other.username, elo: other.elo ?? other.elo_before ?? 500, wins: other.wins || 0, losses: other.losses || 0, mode: other.input_mode }
     if (match.state === 'complete') return withFeedback(<Results key={match.id} m={matchRecord(match, user.id)} me={player.name} onAgain={play} onHome={home} />)
-    if (match.state !== 'active') return <>{connection}<Judging player={player} opp={opp} question={match.question} myText={mine.answer_text || ''} oppText={other.answer_text || ''} error={match.judge_error || game.judgeError} retryAt={match.judge_retry_at} onRetry={() => { void game.judge(match.id) }} /></>
+    if (match.state !== 'active') return <>{connection}{finalNotice}<Judging player={player} opp={opp} question={match.question} myText={mine.answer_text || ''} oppText={other.answer_text || ''} error={match.judge_error || game.judgeError} retryAt={match.judge_retry_at} onRetry={() => { void game.judge(match.id) }} /></>
     if (now < Date.parse(match.round_start)) return <>{connection}<Matchmaking player={player} opp={opp} joinedAt={match.round_start} clockOffset={clockOffset} onCancel={home} /></>
     return <>{connection}<Arena key={match.id} player={player} opp={opp} match={match} mine={mine} now={now} onRefresh={game.refresh} /></>
   }

@@ -38,7 +38,7 @@ Deno.serve(async (request: Request) => {
     try { body=JSON.parse(raw) } catch { throw new ApiError('Invalid JSON.',400) }
     if (!body || typeof body!=='object' || Array.isArray(body)) throw new ApiError('Invalid request.',400)
     const action = body.action
-    const fields: Record<string,string[]> = { today:['action'],start:['action','creationKey','date','mode'],state:['action'],save:['action','position','text'],submit:['action','position','text'],next:['action','position'],judge:['action','position'],distribution:['action'] }
+    const fields: Record<string,string[]> = { today:['action'],start:['action','creationKey','date','mode'],state:['action'],'open-answer':['action','position','writer','previousWriter'],save:['action','position','text','revision','writer'],submit:['action','position','text','revision','writer'],next:['action','position'],judge:['action','position'],distribution:['action'] }
     if (typeof action!=='string' || !fields[action] || Object.keys(body).some((key) => !fields[action].includes(key))) throw new ApiError('Invalid action or fields.',400)
     if (action==='today') return respond(await rpc('daily_today'))
     if (action==='start') {
@@ -54,14 +54,21 @@ Deno.serve(async (request: Request) => {
     if (action==='distribution') return respond(await rpc('daily_distribution',{ p_hash:hash }))
     if (!Number.isInteger(body.position) || Number(body.position)<1 || Number(body.position)>5) throw new ApiError('Invalid question position.',400)
     position=Number(body.position)
+    const uuid=(value: unknown) => typeof value==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    if (action==='open-answer') {
+      if (!uuid(body.writer) || (body.previousWriter!==null && body.previousWriter!==undefined && !uuid(body.previousWriter))) throw new ApiError('Invalid editor token.',400)
+      return respond(await rpc('daily_begin_answer',{p_hash:hash,p_position:position,p_writer:body.writer,p_previous_writer:body.previousWriter || null}))
+    }
     if (action==='save' || action==='submit') {
       if (typeof body.text!=='string' || body.text.length>12000) throw new ApiError('Invalid answer.',400)
-      return respond(await rpc('daily_answer',{ p_hash:hash,p_position:position,p_text:body.text,p_final:action==='submit' }))
+      if (!uuid(body.writer) || !Number.isSafeInteger(body.revision) || Number(body.revision)<1) throw new ApiError('Reload Daily Five to use versioned answer synchronization.',409)
+      return respond(await rpc('daily_answer_v2',{ p_hash:hash,p_position:position,p_text:body.text,p_final:action==='submit',p_revision:body.revision,p_writer:body.writer }))
     }
     if (action==='next') return respond(await rpc('daily_next',{ p_hash:hash,p_position:position }))
     const claim = await rpc('daily_claim',{ p_hash:hash,p_position:position,p_abuse_key:abuseKey })
     if (claim.complete || claim.busy) return respond({ pending:!!claim.busy },claim.busy ? 202 : 200)
     claimToken=claim.token
+    if (claim.answer_confirmed!==true || typeof claim.answer!=='string') throw new ApiError('The saved final answer could not be confirmed. No score has been awarded; retry.',503)
     const groqKey=Deno.env.get('GROQ_API_KEY')
     if (!groqKey) throw new ApiError('Daily judging is not configured.',503)
     const response=await fetch('https://api.groq.com/openai/v1/chat/completions',{ method:'POST',headers:{ Authorization:`Bearer ${groqKey}`,'Content-Type':'application/json' },signal:AbortSignal.timeout(45000),body:JSON.stringify({ model:MODEL,temperature:0.2,max_completion_tokens:3000,response_format:{ type:'json_object' },messages:[{ role:'system',content:DAILY_RUBRIC },{ role:'user',content:JSON.stringify({ question:claim.question,answer:claim.answer }) }] }) })

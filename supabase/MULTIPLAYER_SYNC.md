@@ -61,7 +61,7 @@ Capture before/after counts and row fingerprints for profiles, matches, answers/
 
 No browser connection was available to the agent, so actual two-account Realtime delivery, visual/mobile/IME behavior, microphone hardware and live Groq output still need the checklist below. The independent database races and mocked frontend tests are not claims of live two-account play. Production build passes with existing Vite compatibility and bundle-size warnings.
 
-The audit also found an existing append-only check in Daily Five's separate `daily_answer` RPC. This multiplayer migration does not change that service-only credential protocol or the Daily Five answer client; its editable-input mismatch remains a separate issue. Daily Five's existing regression tests pass, and its data/question behavior are preserved.
+The later `202611200001_daily_reliability.sql` release resolves the separate Daily Five append-only/date-resumption issues and strengthens canonical-final judging for both modes. See DAILY_FIVE.md for the current protocol and regression evidence; the multiplayer migration described above remains unchanged.
 
 ## Two-account manual checklist
 

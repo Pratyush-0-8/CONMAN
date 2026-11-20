@@ -67,6 +67,24 @@ function harness(overrides = {}) {
       }
     },
   };
+  const receipts = new Map();
+  if (overrides.receipt) receipts.set("match:alice", overrides.receipt);
+  const receiptService = {
+    readReceipt: (key) => receipts.get(key) || null,
+    writeReceipt: (key, value) => {
+      if (value) receipts.set(key, value);
+      else receipts.delete(key);
+    },
+    reconcileReceipt: (key, text, locked) => {
+      const r = receipts.get(key);
+      if (r && locked)
+        receipts.set(key, {
+          text: r.text,
+          confirmed: r.text === text,
+          error: r.text === text ? undefined : "Final answer not saved",
+        });
+    },
+  };
   const service = {
     openAnswerSession: overrides.open || (async () => snapshot()),
     saveAnswer: async (...args) => {
@@ -88,7 +106,14 @@ function harness(overrides = {}) {
     }).outputText,
     {
       exports,
-      require: (name) => (name === "react" ? react : name === "./rankedRules" ? rules : service),
+      require: (name) =>
+        name === "react"
+          ? react
+          : name === "./rankedRules"
+            ? rules
+            : name === "./answerReceipt"
+              ? receiptService
+              : service,
       Date: class extends Date {
         static now() {
           return time;
@@ -132,6 +157,7 @@ function harness(overrides = {}) {
     render,
     mine,
     writes,
+    receipts,
     timers,
     listeners,
     snapshot,
@@ -311,8 +337,8 @@ test("duplicate clicks share one final; server-expired or superseded drafts neve
   s.change("Unsynced last edit");
   await s.submit();
   s = expired.render();
-  assert.equal(s.done, true);
-  assert.match(s.error, /last synced answer was used/);
+  assert.equal(s.done, false);
+  assert.match(s.error, /final answer was not saved/);
   expired.close();
   const stolen = harness({ save: async () => stolen.snapshot({ status: "superseded" }) });
   s = await ready(stolen);
@@ -531,4 +557,56 @@ test("actual Arena draft-error Retry calls recovery without submitting the answe
   banner.props.action.props.onClick();
   assert.equal(h.retries(), 1);
   assert.equal(h.calls(), 0);
+});
+
+test("refresh retries an unresolved final from its receipt rather than replacing it with a stale server draft", async () => {
+  const h = harness({
+    receipt: { text: "Nonempty answer visible before refresh", confirmed: false },
+  });
+  h.render();
+  await tick();
+  h.render();
+  await tick();
+  const state = h.render();
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0][1], "Nonempty answer visible before refresh");
+  assert.equal(h.writes[0][2], true);
+  assert.equal(state.done, true);
+  h.close();
+});
+
+test("refresh restores an unsent draft without submitting early, while newer server revisions beat stale caches", async () => {
+  const draft = harness({
+    receipt: { text: "Unsent recent edit", phase: "draft", revision: 5, confirmed: false },
+  });
+  draft.render();
+  await tick();
+  let state = draft.render();
+  await tick();
+  assert.equal(draft.writes.length, 0);
+  assert.equal(state.text, "Unsent recent edit");
+  draft.pulse();
+  await tick();
+  assert.equal(draft.writes[0][2], false);
+  draft.close();
+  const stale = harness({
+    receipt: { text: "Old cached final", phase: "final", revision: 3, confirmed: false },
+  });
+  stale.render();
+  await tick();
+  state = stale.render();
+  await tick();
+  assert.equal(state.text, "Saved text");
+  assert.equal(stale.writes.length, 0);
+  stale.close();
+});
+test("a local edit is retained as a draft receipt before autosave or the deadline callback can run", async () => {
+  const h = harness();
+  const state = await ready(h);
+  state.change("Visible nonempty draft");
+  h.close();
+  // The hook wrote the expectation synchronously; canonical timeout mismatch is also covered by receipt tests.
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.receipts.get("match:alice").text, "Visible nonempty draft");
+  assert.equal(h.receipts.get("match:alice").phase, "draft");
 });

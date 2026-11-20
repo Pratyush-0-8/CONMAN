@@ -63,6 +63,7 @@ function appHarness(path = '/', gameState = { match:null,queue:null }) {
     if (name==='react/jsx-runtime') return { jsx:(type,props) => ({ type,props }),jsxs:(type,props) => ({ type,props }),Fragment:'Fragment' }
     if (name==='./lib/dailyRules') return dailyRules
     if (name==='./lib/navigation') return navigation
+    if (name==='./lib/useAnswerReceipt') return { useAnswerReceipt:()=>null }
     if (name==='./lib/useSocial') return { useSocial:() => ({ invitations:[],error:'',now:Date.now(),refresh:async () => {} }) }
     if (name==='./lib/useRankedGame') return { useRankedGame:(id) => ({ player:id ? { id,name:'tester',elo:500,wins:0,losses:0,draws:0 } : null,history:[],state:gameState,error:'',refresh:async () => {},reloadAccount:async () => {} }) }
     if (name==='./lib/supabase') return { supabase:{ auth:{ getUser:async () => ({ data:{ user:null } }),onAuthStateChange:() => ({ data:{ subscription:{ unsubscribe() {} } } }) } } }

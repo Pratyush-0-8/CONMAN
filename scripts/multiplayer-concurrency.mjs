@@ -89,6 +89,7 @@ try {
     "question_generation.sql",
     "social.sql",
     "answer_sync.sql",
+    "daily_reliability.sql",
   ]) {
     await admin.query(fs.readFileSync("supabase/tests/" + file, "utf8"));
     console.log("PASS native PostgreSQL suite", file);
@@ -251,6 +252,62 @@ try {
   console.log(
     "PASS ranked pairing versus friend acceptance: one active match under overlapping requests",
   );
+  // Daily Five: independent connections compete on one attempt lock.
+  const [{ date: dailyDate }] = await sql(
+    "select (clock_timestamp() at time zone 'America/New_York')::date::text date",
+  );
+  await admin.query("insert into public.daily_challenges(challenge_date) values($1)", [dailyDate]);
+  await admin.query(
+    "insert into public.daily_questions(challenge_date,position,question) select $1,i,'Concurrent Daily question '||i from generate_series(1,5) i",
+    [dailyDate],
+  );
+  await admin.query("update public.daily_challenges set published=true where challenge_date=$1", [
+    dailyDate,
+  ]);
+  const hash = "7".repeat(64),
+    daily = await S1.rpc("daily_start", [hash, "typing", "native-daily", dailyDate]),
+    dw = randomUUID();
+  await S1.rpc("daily_begin_answer", [hash, 1, dw, null]);
+  await admin.query(
+    "update public.daily_answers set started_at=clock_timestamp()-interval '6 seconds',deadline=clock_timestamp()+interval '20 seconds' where attempt_id=$1",
+    [daily.id],
+  );
+  const dailyLock = `select id from public.daily_attempts where id='${daily.id}' for update`;
+  await overlap([S1.name, S2.name], dailyLock, [
+    () => S1.rpc("daily_answer_v2", [hash, 1, "Nonempty newest draft", false, 2, dw]),
+    () => S2.rpc("daily_answer_v2", [hash, 1, "", false, 1, dw]),
+  ]);
+  await overlap([S1.name, S2.name], dailyLock, [
+    () => S1.rpc("daily_answer_v2", [hash, 1, "Nonempty visible final", true, 4, dw]),
+    () => S2.rpc("daily_answer_v2", [hash, 1, "", false, 3, dw]),
+  ]);
+  await S2.rpc("daily_answer_v2", [hash, 1, "", true, 5, dw]);
+  const dailyClaims = await overlap([S1.name, S2.name], dailyLock, [
+    () => S1.rpc("daily_claim", [hash, 1, "native-daily"]),
+    () => S2.rpc("daily_claim", [hash, 1, "native-daily"]),
+  ]);
+  assert.equal(dailyClaims.filter((c) => c.token).length, 1);
+  assert.equal(dailyClaims.filter((c) => c.busy).length, 1);
+  const dc = dailyClaims.find((c) => c.token);
+  assert.equal(dc.answer, "Nonempty visible final");
+  assert.equal(dc.answer_confirmed, true);
+  const ds = { Logic: 8, Creativity: 8, Relevance: 8, Clarity: 8, Depth: 8 };
+  await overlap([S1.name, S2.name], dailyLock, [
+    () => S1.rpc("daily_finish", [hash, 1, dc.token, ds, "test", "test"]),
+    () => S2.rpc("daily_finish", [hash, 1, dc.token, ds, "test", "test"]),
+  ]);
+  const [savedDaily] = await sql(
+    "select answer_text,final_answer_text,total,judge_attempts from public.daily_answers where attempt_id=$1 and position=1",
+    [daily.id],
+  );
+  assert.equal(savedDaily.answer_text, "Nonempty visible final");
+  assert.equal(savedDaily.final_answer_text, savedDaily.answer_text);
+  assert.equal(savedDaily.total, 40);
+  assert.equal(savedDaily.judge_attempts, 1);
+  console.log(
+    "PASS Daily concurrent drafts/final/claim/scoring: a nonempty submitted answer cannot become empty before grading",
+  );
+
   console.log(
     "PASS all native multiplayer concurrency checks (independent PostgreSQL connections)",
   );

@@ -1,6 +1,9 @@
+import type { AnswerSnapshot } from './matchService'
+import type { AnswerTransport } from './useAnswerSync'
 import type { InputMode, Scores } from './game'
 
 export interface DailyRound {
+  answer_revision?: number; answer_writer?: string | null; locked_at?: string | null; final_answer_text?: string | null;
   position: number; question: string | null; started_at: string | null; deadline: string | null; answer_text: string | null
   state: 'active' | 'locked' | 'judging' | 'error' | 'graded' | null
   scores: Scores | null; total: number | null; explanation: string | null; judge_error: string | null
@@ -10,7 +13,7 @@ export interface DailyAttempt {
   id: string; date: string; mode: InputMode; position: number; status: 'active' | 'complete'; final_score: number | null
   rounds: DailyRound[]; server_now: string; clockOffset: number
 }
-export interface DailyToday { date: string; available: boolean; server_now: string }
+export interface DailyToday { next_date_at?: string; clockOffset?: number; date: string; available: boolean; server_now: string }
 export interface DailyDistribution { date: string; count: number; below_count?: number; percentile: number; bins: { from: number; to: number; count: number }[] }
 export interface DailySession { date: string; mode: InputMode; creationKey: string; token?: string }
 
@@ -65,4 +68,16 @@ export async function storeDailySession(session: DailySession) {
     tx.oncomplete=() => { db.close(); resolve() }
     tx.onerror=tx.onabort=() => { db.close(); reject(new Error('Could not save your recovery token. Keep this tab open and retry.')) }
   })
+}
+
+export function dailyAnswerTransport(token: string, position: number): AnswerTransport {
+  return {
+    open: (_id, writer, previous) => dailyRequest<AnswerSnapshot>('open-answer', { position, writer, previousWriter: previous }, token),
+    save: async (_id, text, final, revision, writer) => {
+      const snapshot = await dailyRequest<AnswerSnapshot>(final ? 'submit' : 'save', { position, text, revision, writer }, token)
+      if (snapshot.status==='superseded' || snapshot.status==='stale') return snapshot
+      if (final && (snapshot.answer_text !== text || !snapshot.locked_at || snapshot.final_answer_text !== text || snapshot.final_revision !== snapshot.revision)) throw new Error('Your final answer was not saved. The last received draft is locked; retry to confirm its status.')
+      return snapshot
+    },
+  }
 }

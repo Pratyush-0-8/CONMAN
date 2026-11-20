@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readReceipt, writeReceipt, reconcileReceipt } from "./answerReceipt";
 import { validAnswer } from "./rankedRules";
 import {
   openAnswerSession,
@@ -6,6 +7,12 @@ import {
   type AnswerSnapshot,
   type RankedPlayer,
 } from "./matchService";
+
+export interface AnswerTransport {
+  open: typeof openAnswerSession;
+  save: typeof saveAnswer;
+}
+const rankedTransport: AnswerTransport = { open: openAnswerSession, save: saveAnswer };
 
 // One editor per participant; a refresh takes over using a compare-and-swap token.
 // Drafts may be in flight when finalization starts. Higher revisions win on the server.
@@ -15,7 +22,10 @@ export function useAnswerSync(
   roundStart: string,
   now: number,
   onRefresh: () => Promise<void>,
+  transport: AnswerTransport = rankedTransport,
 ) {
+  const receiptKey = `${matchId}:${mine.player_id}`;
+  const recovery = useRef(readReceipt(receiptKey));
   const [writer] = useState(() => crypto.randomUUID());
   const [text, setText] = useState(mine.answer_text || "");
   const [ready, setReady] = useState(false),
@@ -27,6 +37,8 @@ export function useAnswerSync(
   const latest = useRef(text),
     saved = useRef(text),
     revision = useRef(mine.answer_revision || 0);
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
   const initialWriter = useRef(mine.answer_writer || null);
   const intent = useRef<{ text: string; revision: number } | null>(null);
   const alive = useRef(false),
@@ -45,40 +57,65 @@ export function useAnswerSync(
   clock.current.offset = now - Date.now();
   const refresh = useRef(onRefresh);
   refresh.current = onRefresh;
-  const observe = useCallback((snapshot: AnswerSnapshot) => {
-    if (!alive.current) return;
-    if (snapshot.locked_at || snapshot.status === "locked") {
-      locked.current = true;
-      setDone(true);
-      if (snapshot.answer_text !== latest.current) {
+  const observe = useCallback(
+    (snapshot: AnswerSnapshot) => {
+      if (!alive.current) return;
+      if (snapshot.locked_at || snapshot.status === "locked") {
+        reconcileReceipt(receiptKey, snapshot.answer_text, true);
+        locked.current = true;
+        setDone(true);
+        if (snapshot.answer_text !== latest.current) {
+          setError(
+            "This round is locked. Your last synced answer was used; this tab has edits that were not submitted.",
+          );
+        } else setError("");
+        void refresh.current();
+      } else if (snapshot.status === "superseded" || snapshot.status === "stale") {
+        const record = readReceipt(receiptKey);
+        if (record)
+          writeReceipt(receiptKey, {
+            ...record,
+            confirmed: false,
+            error: "A newer editor owns this answer. Reload to confirm your final submission.",
+          });
+        lost.current = true;
+        setSuperseded(true);
         setError(
-          "This round is locked. Your last synced answer was used; this tab has edits that were not submitted.",
+          "This answer is open in a newer editor. Reload to continue from the saved answer.",
         );
-      } else setError("");
-      void refresh.current();
-    } else if (snapshot.status === "superseded" || snapshot.status === "stale") {
-      lost.current = true;
-      setSuperseded(true);
-      setError("This answer is open in a newer editor. Reload to continue from the saved answer.");
-    } else if (snapshot.status === "expired") {
-      setError(
-        "The answer deadline has passed. Only text received within the server time limit can be used.",
-      );
-      void refresh.current();
-    }
-  }, []);
+      } else if (snapshot.status === "expired") {
+        setError(
+          "The answer deadline has passed. Only text received within the server time limit can be used.",
+        );
+        void refresh.current();
+      }
+    },
+    [receiptKey],
+  );
   const open = useCallback(async () => {
     if (opening.current || opened.current || lost.current || locked.current) return;
     opening.current = true;
     try {
-      const snapshot = await openAnswerSession(matchId, writer, initialWriter.current);
+      const snapshot = await transportRef.current.open(matchId, writer, initialWriter.current);
       if (!alive.current) return;
       if (snapshot.status === "ready") {
         revision.current = snapshot.revision;
         acknowledged.current = snapshot.revision;
-        latest.current = snapshot.answer_text;
+        if (
+          recovery.current &&
+          recovery.current.revision !== undefined &&
+          recovery.current.revision <= snapshot.revision
+        ) {
+          // A newer persisted revision wins over a stale tab cache.
+          recovery.current = null;
+          writeReceipt(receiptKey, null);
+        }
+        latest.current =
+          recovery.current && !recovery.current.confirmed
+            ? recovery.current.text
+            : snapshot.answer_text;
         saved.current = snapshot.answer_text;
-        setText(snapshot.answer_text);
+        setText(latest.current);
         opened.current = true;
         setReady(true);
         setError("");
@@ -107,9 +144,15 @@ export function useAnswerSync(
         return;
       // Update synchronously so submit/deadline callbacks see the last input event before React renders.
       latest.current = value;
+      writeReceipt(receiptKey, {
+        text: value,
+        confirmed: false,
+        phase: "draft",
+        revision: revision.current + 1,
+      });
       setText(value);
     },
-    [mine.input_mode],
+    [mine.input_mode, receiptKey],
   );
   const draft = useCallback(async () => {
     const at = Date.now() + clock.current.offset;
@@ -128,7 +171,7 @@ export function useAnswerSync(
       version = ++revision.current;
     draftBusy.current = true;
     try {
-      const snapshot = await saveAnswer(matchId, value, false, version, writer);
+      const snapshot = await transportRef.current.save(matchId, value, false, version, writer);
       if (!alive.current) return;
       if (snapshot.status === "saved" && version >= acknowledged.current) {
         acknowledged.current = version;
@@ -150,6 +193,12 @@ export function useAnswerSync(
         latest.current = value;
         setText(value);
         intent.current = { text: value, revision: ++revision.current };
+        writeReceipt(receiptKey, {
+          text: value,
+          confirmed: false,
+          phase: "final",
+          revision: intent.current.revision,
+        });
         setFinalizing(true);
       }
       const request = intent.current;
@@ -158,9 +207,28 @@ export function useAnswerSync(
       setError("");
       try {
         // Send immediately; do not wait behind an autosave or a timed-out request.
-        const snapshot = await saveAnswer(matchId, request.text, true, request.revision, writer);
+        const snapshot = await transportRef.current.save(
+          matchId,
+          request.text,
+          true,
+          request.revision,
+          writer,
+        );
+        if (snapshot.answer_text !== request.text || !snapshot.locked_at) {
+          if (snapshot.status !== "stale" && snapshot.status !== "superseded")
+            throw new Error(
+              "Your final answer was not saved. The round is locked with the last received draft. Check the submitted text before continuing.",
+            );
+        }
+        reconcileReceipt(receiptKey, snapshot.answer_text, !!snapshot.locked_at);
         if (alive.current) observe(snapshot);
       } catch (e) {
+        const record = readReceipt(receiptKey);
+        if (record && !record.confirmed)
+          writeReceipt(receiptKey, {
+            ...record,
+            error: e instanceof Error ? e.message : "Final answer could not be confirmed.",
+          });
         if (alive.current && !locked.current)
           setError(e instanceof Error ? e.message : "Answer could not be sent. Retry.");
       } finally {
@@ -168,8 +236,18 @@ export function useAnswerSync(
         if (alive.current) setSubmitting(false);
       }
     },
-    [matchId, writer, observe],
+    [matchId, writer, observe, receiptKey],
   );
+  useEffect(() => {
+    if (
+      ready &&
+      recovery.current &&
+      recovery.current.phase !== "draft" &&
+      !recovery.current.confirmed &&
+      !intent.current
+    )
+      void submit(recovery.current.text);
+  }, [ready, submit]);
   const retry = useCallback(async () => {
     if (lost.current) return;
     if (!opened.current) await open();
