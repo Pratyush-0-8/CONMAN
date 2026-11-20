@@ -3,6 +3,7 @@ import type { AnswerTransport } from './useAnswerSync'
 import type { InputMode, Scores } from './game'
 
 export interface DailyRound {
+  thinking_seconds?: number; answer_seconds?: number;
   answer_revision?: number; answer_writer?: string | null; locked_at?: string | null; final_answer_text?: string | null;
   position: number; question: string | null; started_at: string | null; deadline: string | null; answer_text: string | null
   state: 'active' | 'locked' | 'judging' | 'error' | 'graded' | null

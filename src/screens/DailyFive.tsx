@@ -8,6 +8,7 @@ import { copyDailyResult } from '../lib/dailyRules'
 import { dailyRequest, dailyAnswerTransport, prepareDailySession, storeDailySession, type DailyAttempt, type DailyDistribution, type DailyRound as Round, type DailySession, type DailyToday } from '../lib/dailyService'
 import { useAnswerReceipt } from '../lib/useAnswerReceipt'
 import { writeReceipt } from '../lib/answerReceipt'
+import { savedRoundTiming } from '../lib/rankedRules'
 import { useAnswerSync } from '../lib/useAnswerSync'
 import { dailyRolloverDelay, loadCurrentDaily } from '../lib/dailySession'
 import { requestMicrophone } from '../lib/speech'
@@ -15,13 +16,14 @@ import { requestMicrophone } from '../lib/speech'
 const dateLabel = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined,{ timeZone:'America/New_York',month:'long',day:'numeric',year:'numeric' })
 
 export function DailyInput({ round, mode, now, token, attemptId, onRefresh }: { round: Round; mode: InputMode; now: number; token: string; attemptId: string; onRefresh: () => Promise<void> }) {
+  const timing=savedRoundTiming(Date.parse(round.started_at!),Date.parse(round.deadline!),round.thinking_seconds)
   const sync = useAnswerSync(`${attemptId}:${round.position}`, {
-    player_id: attemptId, username: '', input_mode: mode, deadline: round.deadline!, locked_at: round.locked_at || null,
+    thinking_seconds:timing.thinkingSeconds, player_id: attemptId, username: '', input_mode: mode, deadline: round.deadline!, locked_at: round.locked_at || null,
     answer_text: round.answer_text || '', answer_revision: round.answer_revision, answer_writer: round.answer_writer,
     scores: null, total: null, elo_before: null, elo_after: null, delta: null,
   }, round.started_at!, now, onRefresh, dailyAnswerTransport(token, round.position))
   const { text, error, ready, done, finalizing, submitting, superseded, change, submit, retry } = sync
-  const start=Date.parse(round.started_at!), deadline=Date.parse(round.deadline!), thinking=now<start+5000, left=Math.max(0,deadline-now)
+  const start=Date.parse(round.started_at!), deadline=Date.parse(round.deadline!), thinking=now<timing.inputStart, left=Math.max(0,deadline-now)
   const voiceStarted=useRef(false)
   useEffect(() => { if (ready && !thinking && left>0 && mode==='voice') voiceStarted.current=true },[ready,thinking,left>0,mode])
   useEffect(() => { if (!thinking && left===0 && mode==='typing' && ready && !done) void submit() },[thinking,left===0,mode,ready,done,submit])
@@ -29,12 +31,12 @@ export function DailyInput({ round, mode, now, token, attemptId, onRefresh }: { 
   if (now<start) return <div role="status" className="flex items-center justify-center gap-3 py-10 text-mute"><Spinner />Getting your question ready…</div>
   return <div className="space-y-5">
     {error && <Banner tone="error" title="Your answer is not synced" action={<Button size="sm" onClick={() => { if (superseded) window.location.reload(); else void retry() }}>{superseded ? 'Reload saved answer' : 'Retry'}</Button>}>{error}</Banner>}
-    {thinking ? <div className="flex flex-col items-center gap-5"><CountdownRing left={Math.min(5000,Math.max(0,start+5000-now))} total={5} label="THINK" color="#638BFF" size={208} /><p className="text-sm text-mute">Five seconds to think. Then make your case.</p></div>
+    {thinking ? <div className="flex flex-col items-center gap-5"><CountdownRing left={Math.min(timing.thinkingSeconds*1000,Math.max(0,timing.inputStart-now))} total={timing.thinkingSeconds} label="THINK" color="#638BFF" size={208} /><p className="text-sm text-mute">{timing.thinkingSeconds} seconds to think. Then make your case.</p></div>
       : waiting ? <div role="status" className="flex flex-col items-center gap-4 py-10"><Spinner size={28} /><p className="text-mute">{done ? 'Answer saved. Preparing grading…' : submitting ? 'Saving your final answer…' : 'Final answer not confirmed. Retry submission.'}</p></div>
       : superseded ? <p className="text-sm text-mute">Answer editing is paused in this tab.</p>
       : !ready ? <div role="status" className="flex items-center justify-center gap-3"><Spinner />Restoring your saved answer…</div>
-      : mode==='voice' ? <VoiceInput initial={text} left={left} onText={change} onFinish={(value) => { void submit(value) }} />
-      : <div className="grid gap-6 md:grid-cols-[auto_1fr] md:items-center"><CountdownRing left={left} total={20} label="TYPE" color="#F07878" size={190} /><div className="space-y-4"><AppendInput text={text} onChange={change} disabled={finalizing || superseded || left===0} /><LinearTimer left={left} total={20} color="#F07878" /><Button onClick={() => { void submit() }} disabled={finalizing || superseded}>Submit answer</Button></div></div>}
+      : mode==='voice' ? <VoiceInput initial={text} left={left} totalSeconds={timing.answerSeconds} onText={change} onFinish={(value) => { void submit(value) }} />
+      : <div className="grid gap-6 md:grid-cols-[auto_1fr] md:items-center"><CountdownRing left={left} total={timing.answerSeconds} label="TYPE" color="#F07878" size={190} /><div className="space-y-4"><AppendInput text={text} onChange={change} disabled={finalizing || superseded || left===0} /><LinearTimer left={left} total={timing.answerSeconds} color="#F07878" /><Button onClick={() => { void submit() }} disabled={finalizing || superseded}>Submit answer</Button></div></div>}
   </div>
 }
 
@@ -173,7 +175,7 @@ export function DailyFive() {
         <div className="mt-5"><Button variant="primary" size="lg" disabled={!today?.available || busy} onClick={start}>{busy ? <Spinner /> : <Icon name="bolt" />}{busy ? (mode==='voice' ? 'Allow microphone access…' : 'Starting…') : 'Start Daily Five'}</Button></div>
         {today && !today.available && <p className="mt-4 text-sm text-mute">Today’s questions haven’t been published yet. Please check back soon.</p>}
       </section>
-      <div className="grid gap-4 sm:grid-cols-3">{[['5 questions','Same daily prompts for everyone'],['5s to think',mode==='voice' ? '15s to speak each answer' : '20s to type each answer'],['250 points','Five categories.']].map(([title,description]) => <Card key={title} className="p-6"><h2 className="text-lg font-semibold">{title}</h2><p className="mt-2 text-sm text-mute">{description}</p></Card>)}</div>
+      <div className="grid gap-4 sm:grid-cols-3">{[['5 questions','Same daily prompts for everyone'],['10s to think',mode==='voice' ? '25s to speak each answer' : '35s to type each answer'],['250 points','Five categories.']].map(([title,description]) => <Card key={title} className="p-6"><h2 className="text-lg font-semibold">{title}</h2><p className="mt-2 text-sm text-mute">{description}</p></Card>)}</div>
     </> : showFinal && attempt.status==='complete' ? <>
       <header className="text-center"><Eyebrow>{dateLabel(attempt.date)}</Eyebrow><h1 className="mt-3 text-4xl font-semibold sm:text-6xl">Daily Five Complete.</h1><div className="mt-6 text-7xl font-semibold tabular text-accent">{attempt.final_score}<span className="text-2xl font-normal text-mute"> / 250</span></div></header>
       <div className="grid grid-cols-5 gap-2 sm:gap-4">{attempt.rounds.map((r) => <Card key={r.position} className="p-3 text-center sm:p-5"><Eyebrow>Q{r.position}</Eyebrow><div className="mt-2 text-2xl font-semibold tabular">{r.total}<span className="text-xs font-normal text-mute">/50</span></div></Card>)}</div>

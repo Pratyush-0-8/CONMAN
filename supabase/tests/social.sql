@@ -100,7 +100,7 @@ begin
  perform set_config('request.jwt.claim.sub',a::text,true);
  perform public.test_assert(public.ranked_state()->'match'->>'id'=mid::text,'sender refresh restores same match');
  perform public.test_assert(public.ranked_queue_match('typing',true)=mid,'ranked cannot create conflicting match');
- perform public.test_assert((select deadline from public.ranked_players where match_id=mid and player_id=b)-(select deadline from public.ranked_players where match_id=mid and player_id=a)=interval '5 seconds','friend match uses existing per-mode clocks');
+ perform public.test_assert((select deadline from public.ranked_players where match_id=mid and player_id=b)-(select deadline from public.ranked_players where match_id=mid and player_id=a)=interval '10 seconds','friend match uses existing per-mode clocks');
  perform public.test_assert(not public.social_available(a),'in-match unavailable');
  perform public.test_reject(format('select public.social_send_challenge(%L)',b));
  update public.ranked_players set deadline=clock_timestamp()-interval '4 seconds' where match_id=mid;

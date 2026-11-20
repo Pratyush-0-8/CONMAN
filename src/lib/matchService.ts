@@ -2,11 +2,11 @@ import { type InputMode, type MatchRecord, type PlayerStats, type Scores } from 
 import { supabase } from './supabase'
 
 export interface RankedPlayer {
-  player_id: string; username: string; elo?: number; wins?: number; losses?: number; input_mode: InputMode; deadline: string; locked_at: string | null
+  thinking_seconds?: number; player_id: string; username: string; elo?: number; wins?: number; losses?: number; input_mode: InputMode; deadline: string; locked_at: string | null
   answer_revision?: number; answer_writer?: string | null; answer_text?: string; scores: Scores | null; total: number | null; elo_before: number | null; elo_after: number | null; delta: number | null
 }
 export interface RankedMatch {
-  is_ranked?: boolean; id: string; player1_id: string; player2_id: string; question: string
+  thinking_seconds?: number; is_ranked?: boolean; id: string; player1_id: string; player2_id: string; question: string
   state: 'active' | 'judge_pending' | 'judging' | 'judge_error' | 'complete'
   round_start: string; completed_at: string | null; players: RankedPlayer[]
   judge_error: string | null; judge_retry_at: string | null; judge_attempts: number

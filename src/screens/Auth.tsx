@@ -43,7 +43,7 @@ export function Landing({ go, onLeaderboard, showHeader = true }: { go: Go; onLe
         </div>
         <button onClick={onLeaderboard} className="animate-fade-up mt-6 inline-flex items-center gap-2 text-sm text-mute transition-colors [animation-delay:320ms] hover:text-ink"><Icon name="trophy" size={16} />View the public leaderboard</button>
         <div className="animate-fade-up mt-16 grid w-full max-w-xl grid-cols-3 gap-3 [animation-delay:400ms]">
-          {[['5s', 'Think', '#638BFF'], ['15s', 'Speak', '#F07878'], ['500', 'Starting ELO', '#38C994']].map(([n, l, c]) => (
+          {[['10s', 'Think', '#638BFF'], ['25s', 'Speak', '#F07878'], ['500', 'Starting ELO', '#38C994']].map(([n, l, c]) => (
             <div key={l} className="rounded-xl border border-line bg-card/60 p-4"><div className="text-2xl font-semibold tabular" style={{ color: c }}>{n}</div><div className="text-xs text-mute">{l}</div></div>))}
         </div>
       </main>

@@ -42,6 +42,7 @@ const connect = async (id, name, role = "authenticated") => {
 const waitForLocks = async (names) => {
   const end = Date.now() + 5000;
   while (Date.now() < end) {
+    await admin.query("select pg_stat_clear_snapshot()");
     const [{ count }] = await sql(
       "select count(*)::int from pg_stat_activity where application_name=any($1) and state='active' and wait_event_type='Lock'",
       [names],
@@ -51,18 +52,23 @@ const waitForLocks = async (names) => {
   }
   throw Error("Requests did not overlap on independent PostgreSQL connections");
 };
-const overlap = async (names, lock, operations) => {
+const overlap = async (names, lock, operations, holdMs = 0, ordered = false) => {
   await admin.query("begin");
   await admin.query(lock);
-  const requests = operations.map((fn) => fn());
-  // Attach rejection handlers immediately; still assert each result after releasing the barrier.
-  const results = Promise.all(requests);
+  const requests = [];
   try {
+    for (let i = 0; i < operations.length; i++) {
+      const request = operations[i]();
+      request.catch(() => {});
+      requests.push(request);
+      if (ordered) await waitForLocks(names.slice(0, i + 1));
+    }
     await waitForLocks(names);
+    if (holdMs) await new Promise((resolve) => setTimeout(resolve, holdMs));
   } finally {
     await admin.query("commit");
   }
-  return results;
+  return Promise.all(requests);
 };
 try {
   assert.equal(
@@ -90,6 +96,7 @@ try {
     "social.sql",
     "answer_sync.sql",
     "daily_reliability.sql",
+    "gameplay_timers.sql",
   ]) {
     await admin.query(fs.readFileSync("supabase/tests/" + file, "utf8"));
     console.log("PASS native PostgreSQL suite", file);
@@ -142,7 +149,7 @@ try {
     await A.rpc("ranked_begin_answer", [mid, wa, null]);
     await B.rpc("ranked_begin_answer", [mid, wb, null]);
     await admin.query(
-      "update public.matches set round_start=clock_timestamp()-interval '6 seconds' where id=$1",
+      "update public.matches set round_start=clock_timestamp()-interval '11 seconds' where id=$1",
       [mid],
     );
     const rowLock = `select id from public.matches where id='${mid}' for update`;
@@ -159,10 +166,21 @@ try {
       )[0].answer_text,
       "Newest draft",
     );
-    await overlap([A.name, A2.name], rowLock, [
-      () => A.rpc("ranked_answer_v2", [mid, "Latest final edit", true, 4, wa]),
-      () => A2.rpc("ranked_answer_v2", [mid, "Older autosave", false, 3, wa]),
-    ]);
+    await admin.query(
+      "update public.ranked_players set deadline=clock_timestamp()+interval '750 milliseconds' where match_id=$1 and player_id=$2",
+      [mid, a],
+    );
+    await overlap(
+      [A2.name, A.name],
+      rowLock,
+      [
+        () => A2.rpc("ranked_answer_v2", [mid, "Older autosave", false, 3, wa]),
+        () => A.rpc("ranked_answer_v2", [mid, "Latest final edit", true, 4, wa]),
+      ],
+      2500,
+      true,
+    ); // Both arrived before the deadline; processing finishes beyond the transport grace.
+    console.log("PASS Arena pre-deadline final survives delayed database processing");
     await A.rpc("ranked_answer_v2", [mid, "Conflicting final retry", true, 5, wa]);
     assert.equal(
       (
@@ -269,7 +287,7 @@ try {
     dw = randomUUID();
   await S1.rpc("daily_begin_answer", [hash, 1, dw, null]);
   await admin.query(
-    "update public.daily_answers set started_at=clock_timestamp()-interval '6 seconds',deadline=clock_timestamp()+interval '20 seconds' where attempt_id=$1",
+    "update public.daily_answers set started_at=clock_timestamp()-interval '11 seconds',deadline=clock_timestamp()+interval '20 seconds' where attempt_id=$1",
     [daily.id],
   );
   const dailyLock = `select id from public.daily_attempts where id='${daily.id}' for update`;
@@ -277,10 +295,21 @@ try {
     () => S1.rpc("daily_answer_v2", [hash, 1, "Nonempty newest draft", false, 2, dw]),
     () => S2.rpc("daily_answer_v2", [hash, 1, "", false, 1, dw]),
   ]);
-  await overlap([S1.name, S2.name], dailyLock, [
-    () => S1.rpc("daily_answer_v2", [hash, 1, "Nonempty visible final", true, 4, dw]),
-    () => S2.rpc("daily_answer_v2", [hash, 1, "", false, 3, dw]),
-  ]);
+  await admin.query(
+    "update public.daily_answers set deadline=clock_timestamp()+interval '750 milliseconds' where attempt_id=$1 and position=1",
+    [daily.id],
+  );
+  await overlap(
+    [S2.name, S1.name],
+    dailyLock,
+    [
+      () => S2.rpc("daily_answer_v2", [hash, 1, "", false, 3, dw]),
+      () => S1.rpc("daily_answer_v2", [hash, 1, "Nonempty visible final", true, 4, dw]),
+    ],
+    2500,
+    true,
+  );
+  console.log("PASS Daily pre-deadline final survives delayed database processing");
   await S2.rpc("daily_answer_v2", [hash, 1, "", true, 5, dw]);
   const dailyClaims = await overlap([S1.name, S2.name], dailyLock, [
     () => S1.rpc("daily_claim", [hash, 1, "native-daily"]),

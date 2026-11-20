@@ -27,9 +27,9 @@ begin
  repeated:=public.ranked_queue_match('typing',true);
  if repeated<>mid or (select count(*) from public.ranked_players where match_id=mid)<>2 then raise exception 'Duplicate pairing'; end if;
  if (select player1_id=player2_id from public.matches where id=mid) then raise exception 'Self match'; end if;
- if (select deadline from public.ranked_players where match_id=mid and player_id=b)-(select deadline from public.ranked_players where match_id=mid and player_id=a)<>interval '5 seconds' then raise exception 'Mode deadlines are not synchronized'; end if;
+ if (select deadline from public.ranked_players where match_id=mid and player_id=b)-(select deadline from public.ranked_players where match_id=mid and player_id=a)<>interval '10 seconds' then raise exception 'Mode deadlines are not synchronized'; end if;
  -- Start input without sleeping. Both still derive their time from one saved round_start.
- update public.matches set round_start=clock_timestamp()-interval '6 seconds' where id=mid;
+ update public.matches set round_start=clock_timestamp()-interval '11 seconds' where id=mid;
  perform set_config('request.jwt.claim.sub',a::text,true);
  perform public.ranked_begin_answer(mid,writer_a);
  perform public.ranked_answer_v2(mid,'A real voice answer',true,1,writer_a);

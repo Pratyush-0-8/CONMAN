@@ -12,7 +12,7 @@ insert into public.daily_questions(challenge_date,position,question)
 update public.daily_challenges set published=true where challenge_date in ('2026-11-18','2026-11-20') and not published;
 insert into public.daily_attempts(token_hash,challenge_date,input_mode) values(repeat('1',64),'2026-11-18','typing'),(repeat('2',64),'2026-11-20','typing');
 insert into public.daily_answers(attempt_id,position,started_at,deadline)
- select id,1,clock_timestamp()-interval '6 seconds',clock_timestamp()+interval '20 seconds' from public.daily_attempts where token_hash in (repeat('1',64),repeat('2',64));
+ select id,1,clock_timestamp()-interval '11 seconds',clock_timestamp()+interval '20 seconds' from public.daily_attempts where token_hash in (repeat('1',64),repeat('2',64));
 
 do $$
 declare old_id uuid; current_id uuid; old_snapshot jsonb; w uuid:=gen_random_uuid(); newer uuid:=gen_random_uuid(); result jsonb; claim jsonb; scores jsonb:='{"Logic":8,"Creativity":8,"Relevance":8,"Clarity":8,"Depth":8}'; revision integer:=0; value text; now_day date:=(clock_timestamp() at time zone 'America/New_York')::date;
@@ -70,7 +70,7 @@ begin
  perform set_config('request.jwt.claim.sub',b::text,true); mid:=public.ranked_queue_match('typing',true);
  perform public.ranked_begin_answer(mid,wb);
  perform set_config('request.jwt.claim.sub',a::text,true); perform public.ranked_begin_answer(mid,wa);
- update public.matches set round_start=clock_timestamp()-interval '6 seconds' where id=mid;
+ update public.matches set round_start=clock_timestamp()-interval '11 seconds' where id=mid;
  perform public.ranked_answer_v2(mid,'Nonempty A final',true,1,wa);
  perform set_config('request.jwt.claim.sub',b::text,true); perform public.ranked_answer_v2(mid,'Nonempty B final',true,1,wb);
  select jsonb_agg(to_jsonb(p) order by id) into before_stats from public.profiles p where id in (a,b);

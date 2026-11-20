@@ -134,13 +134,14 @@ function harness(overrides = {}) {
     },
   );
   const mine = {
+    thinking_seconds: overrides.thinkingSeconds,
     player_id: "alice",
     input_mode: overrides.mode || "typing",
     answer_text: "Saved text",
     answer_revision: 4,
     answer_writer: null,
     locked_at: null,
-    deadline: new Date(20000).toISOString(),
+    deadline: new Date(overrides.deadline ?? 20000).toISOString(),
   };
   const render = () => {
     cursor = 0;
@@ -419,7 +420,7 @@ test("actual AppendInput permits editing and blocks paste/drop, including before
   assert.equal(blocked, 4);
 });
 
-function arenaHarness(mode = "typing") {
+function arenaHarness(mode = "typing", thinkingSeconds, deadline = 20000) {
   let slots = [],
     cursor = 0,
     effects = [],
@@ -480,14 +481,16 @@ function arenaHarness(mode = "typing") {
       require: (name) =>
         name === "react"
           ? react
-          : name === "../lib/useAnswerSync"
-            ? { useAnswerSync: () => sync }
-            : name === "react/jsx-runtime"
-              ? {
-                  jsx: (type, props) => ({ type, props }),
-                  jsxs: (type, props) => ({ type, props }),
-                }
-              : new Proxy({}, { get: (_, key) => component(String(key)) }),
+          : name === "../lib/rankedRules"
+            ? rules
+            : name === "../lib/useAnswerSync"
+              ? { useAnswerSync: () => sync }
+              : name === "react/jsx-runtime"
+                ? {
+                    jsx: (type, props) => ({ type, props }),
+                    jsxs: (type, props) => ({ type, props }),
+                  }
+                : new Proxy({}, { get: (_, key) => component(String(key)) }),
       Math,
       Date,
       window: { location: { reload() {} } },
@@ -496,7 +499,7 @@ function arenaHarness(mode = "typing") {
   const mine = {
     player_id: "alice",
     input_mode: mode,
-    deadline: new Date(20000).toISOString(),
+    deadline: new Date(deadline).toISOString(),
     locked_at: null,
   };
   const render = (now) => {
@@ -506,6 +509,7 @@ function arenaHarness(mode = "typing") {
       opp: { name: "Bob" },
       match: {
         id: "match",
+        thinking_seconds: thinkingSeconds,
         round_start: new Date(0).toISOString(),
         question: "Shared question",
         players: [mine],
@@ -609,4 +613,52 @@ test("a local edit is retained as a draft receipt before autosave or the deadlin
   assert.equal(h.writes.length, 0);
   assert.equal(h.receipts.get("match:alice").text, "Visible nonempty draft");
   assert.equal(h.receipts.get("match:alice").phase, "draft");
+});
+
+test("new typing window opens after 10s, remains editable through 35s of input and submits the last pre-deadline edit", async () => {
+  const h = harness({ thinkingSeconds: 10, deadline: 45000 });
+  let s = await ready(h);
+  h.time(9000);
+  s.change("Draft during thinking");
+  h.pulse();
+  await tick();
+  assert.equal(h.writes.length, 0);
+  h.time(10000);
+  h.pulse();
+  await tick();
+  assert.equal(h.writes.length, 1);
+  h.time(44999);
+  s.change("Final edit with backspace and replacement");
+  h.time(45000);
+  s.change("Late edit rejected");
+  await s.submit();
+  assert.equal(h.writes.at(-1)[1], "Final edit with backspace and replacement");
+  h.close();
+});
+test("new voice window uses 10s thinking and 25s speaking while preserving the final transcription callback", async () => {
+  const h = harness({ mode: "voice", thinkingSeconds: 10, deadline: 35000 });
+  let s = await ready(h);
+  h.time(34999);
+  s.change("Last recognized words");
+  h.pulse();
+  await tick();
+  h.time(35500);
+  await s.submit("Final corrected transcription");
+  assert.equal(h.writes.at(-1)[1], "Final corrected transcription");
+  assert.equal(h.writes.at(-1)[2], true);
+  h.close();
+});
+test("actual Arena renders persisted 10/35/25 durations and auto-submits at the saved new deadline", () => {
+  const typing = arenaHarness("typing", 10, 45000);
+  let tree = typing.render(0);
+  assert.equal(typing.find(tree, "CountdownRing").props.total, 10);
+  tree = typing.render(10000);
+  assert.equal(typing.find(tree, "CountdownRing").props.total, 35);
+  typing.render(44999);
+  assert.equal(typing.calls(), 0);
+  typing.render(45000);
+  assert.equal(typing.calls(), 1);
+  const voice = arenaHarness("voice", 10, 35000);
+  tree = voice.render(10000);
+  assert.equal(voice.find(tree, "VoiceInput").props.totalSeconds, 25);
 });

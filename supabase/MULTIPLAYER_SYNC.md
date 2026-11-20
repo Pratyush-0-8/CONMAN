@@ -1,5 +1,7 @@
 # Editable multiplayer answer synchronization
 
+The later `202611200002_gameplay_timers.sql` release adds persisted timing rules for new games (10s thinking, 35s typing, 25s voice) while preserving existing rounds. See DAILY_FIVE.md for the current timer rollout and lock-delay verification. The answer synchronization protocol below remains in place.
+
 ## Root cause
 
 `AppendInput` in `src/screens/Arena.tsx` already allowed backspace, deletion, and replacements. Both ranked games and friend challenges used `ranked_answer(uuid,text,boolean)`, whose deployed body still contained:

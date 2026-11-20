@@ -32,7 +32,7 @@ begin
  perform public.test_reject(format('select public.ranked_answer_v2(%L,''forged'',true,1,%L)',mid,wa));
  perform set_config('request.jwt.claim.sub',a::text,true); perform public.ranked_begin_answer(mid,wa);
  perform public.test_reject(format('select public.ranked_answer(%L,''legacy'',false)',mid));
- update public.matches set round_start=clock_timestamp()-interval '6 seconds' where id=mid;
+ update public.matches set round_start=clock_timestamp()-interval '11 seconds' where id=mid;
  i:=0;
  foreach text_value in array array['Hello world','Hello worl','Hi worl','Hi world','world','','你好','😀 replacing all text'] loop
   i:=i+1;
@@ -81,7 +81,7 @@ begin
  perform set_config('request.jwt.claim.sub',a::text,true); perform public.ranked_queue_match('typing',true);
  perform set_config('request.jwt.claim.sub',b::text,true); mid:=public.ranked_queue_match('typing',true);
  perform public.ranked_begin_answer(mid,wb);
- update public.matches set round_start=clock_timestamp()-interval '6 seconds' where id=mid;
+ update public.matches set round_start=clock_timestamp()-interval '11 seconds' where id=mid;
  update public.ranked_players set deadline=clock_timestamp()-interval '100 milliseconds' where match_id=mid and player_id=b;
  result:=public.ranked_answer_v2(mid,'Typing final within existing grace',true,1,wb);
  perform public.test_assert(result->>'locked_at' is not null and result->>'answer_text'='Typing final within existing grace','typing final grace');

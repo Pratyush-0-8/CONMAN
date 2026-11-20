@@ -9,15 +9,15 @@ test('cross-mode clocks share thinking and have mode-specific deadlines', () => 
   assert.equal(roundPhase(9999,start,'voice'),'matched')
   for (const mode of ['voice','typing']) {
     assert.equal(roundPhase(start,start,mode),'think')
-    assert.equal(roundPhase(start+4999,start,mode),'think')
-    assert.equal(roundPhase(start+5000,start,mode),'input')
-    assert.equal(roundPhase(start+6000,start,mode,true),'waiting')
+    assert.equal(roundPhase(start+9999,start,mode),'think')
+    assert.equal(roundPhase(start+10000,start,mode),'input')
+    assert.equal(roundPhase(start+11000,start,mode,true),'waiting')
   }
-  assert.equal(inputDeadline(start,'voice'),30000)
-  assert.equal(inputDeadline(start,'typing'),35000)
-  assert.equal(roundPhase(30000,start,'voice'),'waiting')
-  assert.equal(roundPhase(30000,start,'typing'),'input')
-  assert.equal(roundPhase(35000,start,'typing'),'waiting')
+  assert.equal(inputDeadline(start,'voice'),45000)
+  assert.equal(inputDeadline(start,'typing'),55000)
+  assert.equal(roundPhase(45000,start,'voice'),'waiting')
+  assert.equal(roundPhase(45000,start,'typing'),'input')
+  assert.equal(roundPhase(55000,start,'typing'),'waiting')
 })
 test('editable answers accept backspace, deletion, middle edits, replacement and Unicode within the length limit', () => {
   for (const text of ['hell', 'Hello', 'heXllo', 'world hello', '', '你好世界', '😀!']) assert.equal(validAnswer(text),true)

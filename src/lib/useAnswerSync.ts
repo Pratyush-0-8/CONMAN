@@ -51,7 +51,7 @@ export function useAnswerSync(
     acknowledged = useRef(0);
   const clock = useRef({
     offset: now - Date.now(),
-    start: Date.parse(roundStart) + 5000,
+    start: Date.parse(roundStart) + (mine.thinking_seconds ?? 5) * 1000,
     deadline: Date.parse(mine.deadline),
   });
   clock.current.offset = now - Date.now();

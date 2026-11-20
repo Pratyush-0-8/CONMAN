@@ -1,5 +1,21 @@
 # Daily Five deployment
 
+## Gameplay timing update (202611200002)
+
+New Daily attempts, ranked Arena matches and friend challenges use **10 seconds thinking**, then **35 seconds typing** or **25 seconds voice** (45/35 seconds total, excluding the unchanged delivery/match countdown lead).
+
+Apply only `migrations/202611200002_gameplay_timers.sql` to existing production. The migration adds saved timing metadata: existing matches keep a 5-second thinking phase and every existing Daily attempt keeps its original 5/20/15 rules, including questions started later through Next. Existing starts, deadlines, answers, scores and history are not recalculated. New rows receive the new defaults. Clients read the saved thinking duration and derive the answer duration from the persisted start/deadline, so refreshes and reconnects cannot restart or extend clocks. Old responses without metadata retain the old five-second fallback during rollout.
+
+Changed RPCs: `ranked_queue_match`, `social_respond_challenge`, `daily_start`, `daily_next`, `ranked_answer_v2`, `daily_answer_v2`, `ranked_state`, `daily_state`, `ranked_tick`, and `daily_tick`. Mode-specific Arena deadlines share the same round/thinking start. The four-second match countdown, 750ms Daily delivery lead, matchmaking queue/staleness/rating expansion, invitation expiry, polling and judge leases/retry periods are unchanged.
+
+Answer validation and timeout ticks use trusted PostgreSQL `statement_timestamp()` rather than the time execution happens to finish. A valid request received before the deadline (or within the existing final transport grace) can therefore survive database lock/processing delays. Earlier queued autosaves/polls use the same time reference and cannot prematurely expire a timely final behind them. No browser-supplied timestamps are trusted. Late arrivals remain rejected, already locked answers remain immutable, and final grace stays 500ms typing / 1500ms voice. Arbitrary network delays beyond that server-receipt boundary cannot extend input time.
+
+Updated frontend files: `rankedRules.ts`, timing metadata types in `matchService.ts` / `dailyService.ts`, `useAnswerSync.ts`, `Arena.tsx`, `DailyFive.tsx`, and the existing Home/Auth timing copy. Voice rings/bars receive the saved per-round duration. Typing/backspace/editing and paste/drop restrictions are unchanged. The question-generation prompt describes the new durations; Daily judging's timing description supports either saved ruleset. Redeploy `daily-five` and `generate-questions` for those supporting prompt changes; the model, grading calibration, generator quotas, question inventory and schedules are unchanged.
+
+Verification: **76 automated tests**, eight disposable SQL suites, frontend/Edge TypeScript checks, and production build. `scripts/gameplay-timers.test.mjs` proves the forward migration preserves existing rounds/attempts and renders new/legacy timing correctly. `tests/gameplay_timers.sql` covers new mode totals, synchronized multiplayer starts, refreshes, thinking enforcement and final persistence. Independent native PostgreSQL connections deliberately queue an older autosave before a final, hold both beyond the grace window, and verify that the timely final persists in ranked, unranked and Daily play. Existing grading/Elo/privacy and versioned-answer regression checks continue to pass.
+
+Manual check: refresh open tabs, start a **new** Daily attempt or Arena/friend match, confirm 10s thinking followed by 35s Typing or 25s Voice, refresh during both phases and submit near the deadline. Continue an already-started Daily attempt and confirm its original timing remains intact. A real browser/microphone connection was unavailable to the agent, so hardware/mobile and live two-account UI checks remain manual.
+
 ## Reliability fix (202611200001)
 
 The current Daily Five protocol requires `migrations/202611200001_daily_reliability.sql`, the updated `daily-five` and `clever-action` Edge Functions, and the matching frontend. Apply only this new forward migration to an existing installation; the original rollout notes below are historical.

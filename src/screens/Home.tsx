@@ -58,7 +58,7 @@ export function Home({ player, history, mode, setMode, onPlay, go, openMatch }: 
           <div className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full bg-accent/10 blur-3xl" />
           <div className="flex items-start justify-between"><div><Eyebrow className="!text-accent">Mode</Eyebrow><h3 className="mt-1 text-2xl font-semibold">Ranked 1v1</h3><p className="mt-1 max-w-sm text-sm text-mute">Same question for both players. Judged on five dimensions of reasoning. ELO on the line.</p></div><Icon name="trophy" size={28} className="text-accent" /></div>
           <div className="mt-6 grid grid-cols-3 gap-3">
-            {[['5s', 'Think', '#638BFF'], [mode === 'voice' ? '15s' : '20s', mode === 'voice' ? 'Speak' : 'Type', '#F07878'], ['5', 'Criteria', '#38C994']].map(([n, l, c]) => (
+            {[['10s', 'Think', '#638BFF'], [mode === 'voice' ? '25s' : '35s', mode === 'voice' ? 'Speak' : 'Type', '#F07878'], ['5', 'Criteria', '#38C994']].map(([n, l, c]) => (
               <div key={l} className="rounded-xl border border-line bg-card2/60 p-4"><div className="text-2xl font-semibold tabular" style={{ color: c }}>{n}</div><div className="text-xs text-mute">{l}</div></div>))}
           </div>
           <p className="mt-6 border-t border-line pt-4 text-xs text-mute">Voice and Typing share one ranked pool and ELO.</p>

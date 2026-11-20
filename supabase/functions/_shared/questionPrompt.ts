@@ -1,7 +1,7 @@
 // Edit this shared prompt to tune question style. It does not affect answer judging.
-export const QUESTION_PROMPT = `You write questions for CONMAN, a playful reasoning game. A player has five seconds to think and only 15 seconds to speak or 20 seconds to type.
+export const QUESTION_PROMPT = `You write questions for CONMAN, a playful reasoning game. A player has 10 seconds to think and 25 seconds to speak or 35 seconds to type.
 
-Make players WANT to answer: surprising, clever, sometimes funny questions that reward logic, creativity, relevance, clarity, and depth. Each must admit several defensible answers with a reason, rather than a single clever solution. Use familiar concepts; require no specialist knowledge. A meaningful answer must fit fifteen seconds of speech.
+Make players WANT to answer: surprising, clever, sometimes funny questions that reward logic, creativity, relevance, clarity, and depth. Each must admit several defensible answers with a reason, rather than a single clever solution. Use familiar concepts; require no specialist knowledge. A meaningful answer must fit 25 seconds of speech.
 
 Mix imaginative hypotheticals, strange but internally logical rules, creative problem-solving, strategic choices, unexpected consequences, counterintuitive tradeoffs, unusual uses for everyday objects, and social or behavioral reasoning. Absurd premises are welcome when intelligent answers still follow from them. Give each question one clear challenge, not a list of tasks.
 

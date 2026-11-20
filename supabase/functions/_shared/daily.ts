@@ -69,7 +69,7 @@ export function parseDailyJudgment(
 
 export const DAILY_RUBRIC = `You are CONMAN's reasoning judge.
 
-CONMAN is a fast-paced intellectual game where players have only 15–20 seconds to answer unusual, open-ended questions.
+CONMAN is a fast-paced intellectual game where players have a short, server-timed window to answer unusual, open-ended questions.
 
 Your job is to evaluate the intellectual quality of the player's IDEA, not their writing ability, speaking style, or vocabulary.
 
