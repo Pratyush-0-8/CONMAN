@@ -1,4 +1,4 @@
-import { MODEL } from '../_shared/judge.ts'
+import { judgeWithProviders, JudgeProviderError } from '../_shared/judgeProvider.ts'
 import { DAILY_RUBRIC, digest, easternDate, issueCredential, parseDailyJudgment } from '../_shared/daily.ts'
 
 class ApiError extends Error { constructor(message: string, public status: number) { super(message) } }
@@ -69,25 +69,23 @@ Deno.serve(async (request: Request) => {
     if (claim.complete || claim.busy) return respond({ pending:!!claim.busy },claim.busy ? 202 : 200)
     claimToken=claim.token
     if (claim.answer_confirmed!==true || typeof claim.answer!=='string') throw new ApiError('The saved final answer could not be confirmed. No score has been awarded; retry.',503)
-    const groqKey=Deno.env.get('GROQ_API_KEY')
-    if (!groqKey) throw new ApiError('Daily judging is not configured.',503)
-    const response=await fetch('https://api.groq.com/openai/v1/chat/completions',{ method:'POST',headers:{ Authorization:`Bearer ${groqKey}`,'Content-Type':'application/json' },signal:AbortSignal.timeout(45000),body:JSON.stringify({ model:MODEL,temperature:0.2,max_completion_tokens:3000,response_format:{ type:'json_object' },messages:[{ role:'system',content:DAILY_RUBRIC },{ role:'user',content:JSON.stringify({ question:claim.question,answer:claim.answer }) }] }) })
-    rateLimited=response.status===429
-    if (!response.ok) throw new ApiError('Daily judging is temporarily unavailable. Your answer is saved.',response.status===429 ? 429 : 503)
-    const data=await response.json()
-    const judgment=parseDailyJudgment(data.choices?.[0]?.message?.content || '')
+    const { judgment, model } = await judgeWithProviders({
+      prompt: DAILY_RUBRIC, input: { question:claim.question,answer:claim.answer },
+      parse:parseDailyJudgment, env:(name) => Deno.env.get(name), fetcher:fetch,
+    })
     let state: unknown
-    // A database retry reuses the one Groq response; the SQL claim makes scoring idempotent.
+    // A database retry reuses the one model response; the SQL claim makes scoring idempotent.
     for (let attempt=0;attempt<2;attempt++) {
-      try { state=await rpc('daily_finish',{ p_hash:hash,p_position:position,p_claim:claimToken,p_scores:judgment.scores,p_explanation:judgment.explanation,p_model:MODEL }); break }
+      try { state=await rpc('daily_finish',{ p_hash:hash,p_position:position,p_claim:claimToken,p_scores:judgment.scores,p_explanation:judgment.explanation,p_model:model }); break }
       catch (error) { if (attempt===1) throw error }
     }
     return respond(state)
   } catch (error) {
+    if (error instanceof JudgeProviderError) rateLimited=error.status===429
     const message=error instanceof Error ? error.message : 'Daily Five is temporarily unavailable.'
     if (hash && position && claimToken) {
       try { await rpc('daily_fail',{ p_hash:hash,p_position:position,p_claim:claimToken,p_error:message,p_rate_limited:rateLimited }) } catch { /* Lease expiry permits recovery if the worker lost its database connection. */ }
     }
-    return respond({ error:message },error instanceof ApiError ? error.status : 503)
+    return respond({ error:message },error instanceof ApiError || error instanceof JudgeProviderError ? error.status : 503)
   }
 })

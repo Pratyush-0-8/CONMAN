@@ -1,4 +1,5 @@
-import { MODEL, RUBRIC, parseJudgment } from '../_shared/judge.ts'
+import { judgeWithProviders } from '../_shared/judgeProvider.ts'
+import { RUBRIC, parseJudgment } from '../_shared/judge.ts'
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }
 const respond = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
@@ -33,22 +34,15 @@ Deno.serve(async (request: Request) => {
     if (claim.busy) return respond({ pending: true }, 202)
     token = claim.token
     if (claim.answers_confirmed !== true || typeof claim.answers?.[claim.player1_id] !== 'string' || typeof claim.answers?.[claim.player2_id] !== 'string') throw new Error('The saved final answers could not be confirmed. No ratings have been awarded; retry.')
-    const apiKey = Deno.env.get('GROQ_API_KEY')
-    if (!apiKey) throw new Error('Judge is not configured')
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(45000),
-      body: JSON.stringify({ model: MODEL, temperature: 0.2, max_completion_tokens: 3000, response_format: { type: 'json_object' }, messages: [
-        { role: 'system', content: RUBRIC },
-        { role: 'user', content: JSON.stringify({ question: claim.question, player1Answer: claim.answers[claim.player1_id], player2Answer: claim.answers[claim.player2_id] }) },
-      ] }),
+    const { judgment: scores, model } = await judgeWithProviders({
+      prompt: RUBRIC,
+      input: { question: claim.question, player1Answer: claim.answers[claim.player1_id], player2Answer: claim.answers[claim.player2_id] },
+      parse: parseJudgment, env: (name) => Deno.env.get(name), fetcher: fetch,
     })
-    if (!response.ok) throw new Error(`Judge service unavailable (${response.status}). Please retry.`)
-    const output = await response.json()
-    const scores = parseJudgment(output.choices?.[0]?.message?.content || '')
-    // Retry only database finalization, never another Groq call in this invocation.
+    // Retry only database finalization, never another model call in this invocation.
     let result: unknown
     for (let attempt = 0; attempt < 2; attempt++) {
-      try { result = await rpc('ranked_finalize', { p_match: matchId, p_token: token, p_scores1: scores.player1, p_scores2: scores.player2, p_model: MODEL }); break }
+      try { result = await rpc('ranked_finalize', { p_match: matchId, p_token: token, p_scores1: scores.player1, p_scores2: scores.player2, p_model: model }); break }
       catch (error) { if (attempt === 1) throw error }
     }
     return respond(result)

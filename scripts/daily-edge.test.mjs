@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import * as providers from '../supabase/functions/_shared/judgeProvider.ts';
 import * as judge from "../supabase/functions/_shared/judge.ts";
 import * as daily from "../supabase/functions/_shared/daily.ts";
 
@@ -28,6 +29,9 @@ function endpoint({
       SUPABASE_URL: "https://db.test",
       SUPABASE_SERVICE_ROLE_KEY: "server-only",
       GROQ_API_KEY: "server-groq",
+      AZURE_OPENAI_ENDPOINT: "https://test.services.ai.azure.com",
+      AZURE_OPENAI_API_KEY: "server-azure",
+      AZURE_OPENAI_DEPLOYMENT: "gpt-4.1-mini",
     };
   const code = ts.transpileModule(
     fs.readFileSync(new URL("../supabase/functions/daily-five/index.ts", import.meta.url), "utf8"),
@@ -35,7 +39,7 @@ function endpoint({
   ).outputText;
   vm.runInNewContext(code, {
     exports: {},
-    require: (name) => (name.endsWith("/judge.ts") ? judge : daily),
+    require: (name) => name.endsWith("/judgeProvider.ts") ? providers : (name.endsWith("/judge.ts") ? judge : daily),
     Error,
     Response,
     Request,
@@ -49,11 +53,12 @@ function endpoint({
     },
     fetch: async (url, options) => {
       const body = JSON.parse(options.body);
-      if (url.includes("api.groq.com")) {
+      if (url.includes("api.groq.com") || url.includes("services.ai.azure.com")) {
         groqCalls++;
-        assert.equal(body.model, judge.MODEL);
+        assert.equal(body.model, url.includes("api.groq.com") ? judge.MODEL : "gpt-4.1-mini");
         assert.equal(body.messages.length, 2);
-        assert.equal(options.headers.Authorization, "Bearer server-groq");
+        if (url.includes("api.groq.com")) assert.equal(options.headers.Authorization, "Bearer server-groq");
+        else assert.equal(options.headers["api-key"], "server-azure");
         assert.deepEqual(JSON.parse(body.messages[1].content), {
           question: "Saved question",
           answer: expectedAnswer,
@@ -198,7 +203,7 @@ test("public endpoint creates and recovers a server-issued attempt without Auth 
   assert.equal((await api.call({ action: "state" })).status, 403);
   assert.ok(api.stats().calls.every(({ name }) => name.startsWith("daily_")));
 });
-test("one intended Groq call uses persisted question/answer and never Arena/ELO", async () => {
+test("one intended Azure call uses persisted question/answer and never Arena/ELO", async () => {
   const api = endpoint(),
     attempt = await start(api);
   assert.equal((await api.call({ action: "judge", position: 1 }, attempt.token)).status, 200);
@@ -210,7 +215,7 @@ test("one intended Groq call uses persisted question/answer and never Arena/ELO"
     400,
   );
 });
-test("concurrent claim or previously graded result does not call Groq", async () => {
+test("concurrent claim or previously graded result does not call either provider", async () => {
   for (const options of [{ busy: true }, { graded: true }]) {
     const api = endpoint(options),
       attempt = await start(api);

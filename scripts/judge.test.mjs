@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import * as providers from '../supabase/functions/_shared/judgeProvider.ts';
 import * as judge from "../supabase/functions/_shared/judge.ts";
 
 const matchId = "10000000-0000-4000-8000-000000000001";
@@ -26,12 +27,12 @@ function endpoint({
   }).outputText;
   vm.runInNewContext(code, {
     exports: {},
-    require: () => judge,
+    require: (name) => name.endsWith('/judgeProvider.ts') ? providers : judge,
     Response,
     Request,
     AbortSignal,
     Deno: {
-      env: { get: (key) => (key === "SUPABASE_URL" ? "https://test.supabase.co" : "test-secret") },
+      env: { get: (key) => ({ SUPABASE_URL:'https://test.supabase.co', AZURE_OPENAI_ENDPOINT:'https://test.services.ai.azure.com', AZURE_OPENAI_DEPLOYMENT:'gpt-4.1-mini' }[key] || 'test-secret') },
       serve: (fn) => {
         handler = fn;
       },
@@ -50,9 +51,9 @@ function endpoint({
           answers: { player1: "real first", player2: "real second" },
           ...claim,
         });
-      if (url.includes("api.groq.com")) {
+      if (url.includes("api.groq.com") || url.includes("services.ai.azure.com")) {
         groqCalls++;
-        assert.equal(JSON.parse(options.body).model, judge.MODEL);
+        assert.equal(JSON.parse(options.body).model, url.includes("api.groq.com") ? judge.MODEL : "gpt-4.1-mini");
         return groqFailure
           ? new Response("", { status: 429 })
           : Response.json({
@@ -106,14 +107,14 @@ function endpoint({
     counts: () => ({ groqCalls, finalized, failed }),
   };
 }
-test("one joint Groq request and database-only retry", async () => {
+test("one joint primary request and database-only retry", async () => {
   const api = endpoint({ finalizationRetry: true });
   const response = await api.call({ matchId });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).winner, "draw");
   assert.deepEqual(api.counts(), { groqCalls: 1, finalized: 2, failed: 0 });
 });
-test("completed and claimed matches never call Groq again", async () => {
+test("completed and claimed matches never call a provider again", async () => {
   for (const claim of [{ complete: true, result: { winner: "draw" } }, { busy: true }]) {
     const api = endpoint({ claim });
     await api.call({ matchId });
@@ -124,7 +125,7 @@ test("malformed output or rate limits do not finalize or fabricate scores", asyn
   for (const options of [{ malformed: true }, { groqFailure: true }]) {
     const api = endpoint(options);
     assert.equal((await api.call({ matchId })).status, 503);
-    assert.deepEqual(api.counts(), { groqCalls: 1, finalized: 0, failed: 1 });
+    assert.deepEqual(api.counts(), { groqCalls: options.groqFailure ? 2 : 1, finalized: 0, failed: 1 });
   }
 });
 test("arbitrary frontend answers are rejected", async () => {
