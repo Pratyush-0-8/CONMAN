@@ -1,7 +1,8 @@
 import { MODEL } from './judge.ts'
 
 export class JudgeProviderError extends Error {
-  constructor(message: string, public status = 503, public transient = false) { super(message) }
+  status: number; transient: boolean
+  constructor(message: string, status = 503, transient = false) { super(message); this.status = status; this.transient = transient }
 }
 
 // The combined provider window stays within the existing 90-second database claim lease.
@@ -15,7 +16,8 @@ export async function judgeWithProviders<T>({ prompt, input, parse, env, fetcher
   try { base = new URL(endpoint) } catch { throw new JudgeProviderError('Azure judging endpoint is invalid.') }
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash
     || !/\.(?:openai\.azure\.com|services\.ai\.azure\.com)$/.test(base.hostname)) throw new JudgeProviderError('Azure judging endpoint is invalid.')
-  const azureUrl = endpoint.replace(/\/+$/, '').replace(/\/openai\/v1$/, '') + '/openai/v1/chat/completions'
+  // Portal endpoints may include /openai/v1/responses; use this resource's Chat Completions route.
+  const azureUrl = base.origin + '/openai/v1/chat/completions'
   const messages = [{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify(input) }]
   const complete = async (provider: 'azure' | 'groq') => {
     const azure = provider === 'azure', apiKey = azure ? key : env('GROQ_API_KEY')

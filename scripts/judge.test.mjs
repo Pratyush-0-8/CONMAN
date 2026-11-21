@@ -78,10 +78,11 @@ function endpoint({
             ),
           );
         }
+        assert.equal(body.p_model, "azure:gpt-4.1-mini");
         finalized++;
         if (finalizationRetry && finalized === 1) return new Response("", { status: 503 });
         return Response.json({
-          model: judge.MODEL,
+          model: body.p_model,
           winner: "draw",
           player1: { scores, total: 38 },
           player2: { scores, total: 38 },
