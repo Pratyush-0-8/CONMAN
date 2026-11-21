@@ -57,7 +57,7 @@ export function PromptCard({ question, compact, children }: { question: string; 
   return (
     <div className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-b from-card2 to-card p-6 text-center shadow-[0_30px_80px_-40px_rgba(99,139,255,0.35)] sm:p-10">
       <svg className="pointer-events-none absolute -right-10 -top-10 opacity-[0.06]" width="220" height="220" viewBox="0 0 32 32" fill="none"><circle cx="12" cy="16" r="9" stroke="#fff" /><circle cx="20" cy="16" r="9" stroke="#fff" /></svg>
-      <Eyebrow className="flex items-center justify-center gap-2 !text-accent"><span className="size-1.5 rounded-full bg-accent" />The question · identical for both players</Eyebrow>
+      <Eyebrow className="flex items-center justify-center gap-2 !text-accent"><span className="size-1.5 rounded-full bg-accent" />The question</Eyebrow>
       <h2 className={`mx-auto mt-4 max-w-3xl font-serif font-medium leading-[1.15] tracking-tight text-balance ${compact ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-5xl'}`}>{question}</h2>
       {children}
     </div>
