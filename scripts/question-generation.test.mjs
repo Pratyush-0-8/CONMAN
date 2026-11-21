@@ -147,3 +147,21 @@ test('provider outages stay bounded and post-commit cleanup never regenerates a 
   const outage=endpoint({ providerError:true }); assert.equal((await outage.invoke({ action:'daily_refill' })).status,503); assert.equal(outage.stats().apiCalls,3); assert.equal(outage.stats().commits,0)
   const committed=endpoint({ cleanupFailure:true }); const response=await committed.invoke({ action:'daily_refill' }); assert.equal(response.status,200); assert.match((await response.json()).warning,/Batch committed/); assert.equal(committed.stats().apiCalls,1); assert.equal(committed.stats().commits,1)
 })
+
+test('same client situation is rejected even when the persuasive objective changes',()=>{
+ const first='Your client refused a gift. How would you persuade the judge this protected a friendship from becoming an expensive competition?'
+ const second='Your client refused a gift. Why should the judge consider that a clever strategy for avoiding unwanted publicity and attention?'
+ assert.equal(prompt.questionsNear(first,second),false)
+ assert.ok(prompt.sameSituation(first,second))
+ assert.throws(()=>prompt.validateQuestionBatch({questions:[second,...questions.slice(0,4)]},5,[first]),/Duplicate/)
+ const exclusions=prompt.excludedSituations(Array(200).fill(first))
+ assert.equal(exclusions.length,1);assert.ok(!exclusions[0].includes('persuade'))
+})
+
+test('different concrete decisions can share a setting without being the same situation',()=>{
+ const pillows='Your client, a hotel manager, removed all the pillows from the guest rooms. What argument would persuade the judge this enhanced the stay?'
+ const mirrors='Your client, a hotel manager, removed all the mirrors from the guest rooms. What argument would show this improved the guest experience?'
+ assert.equal(prompt.sameSituation(pillows,mirrors),false)
+ assert.equal(prompt.questionsNear(pillows,mirrors),false)
+ assert.equal(prompt.validateQuestionBatch({questions:[pillows,...questions.slice(0,4)]},5,[mirrors]).length,5)
+})

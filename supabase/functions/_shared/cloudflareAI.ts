@@ -1,4 +1,4 @@
-import { QUESTION_PROMPT, questionInspiration, recentQuestionDetails } from './questionPrompt.ts'
+import { QUESTION_PROMPT, questionInspiration, recentQuestionDetails, excludedSituations } from './questionPrompt.ts'
 
 export const DEFAULT_QUESTION_MODEL='@cf/google/gemma-4-26b-a4b-it'
 export class CloudflareError extends Error {
@@ -32,6 +32,7 @@ export async function runQuestionModel({ accountId,apiToken,model=DEFAULT_QUESTI
               count,
               creativeInspiration: questionInspiration(),
               recentlyUsedDetails: recentQuestionDetails(history),
+              excludedSituations: excludedSituations(history),
               correction: /duplicate/i.test(feedback)
                 ? 'The prior batch repeated an archived question. Invent completely unrelated premises; avoid rewording earlier ideas.'
                 : feedback.slice(0, 300)
